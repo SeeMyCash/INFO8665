@@ -1,0 +1,14 @@
+{
+  "config_hash": "de24b96f0bf40b203f06d23aef46fc7ddb67a742d328a3bb20cade33c2d5da21",
+  "config_path": "training/configs/detector_config.json",
+  "finished_at": 1771590780,
+  "mode": "smoke",
+  "outputs": {
+    "checkpoint": "C:/Users/femil/Documents/PersonalProjects/SMC_data/INFO8665/training/outputs/detector/smoke/checkpoint.json",
+    "metrics": "C:/Users/femil/Documents/PersonalProjects/SMC_data/INFO8665/training/outputs/detector/smoke/metrics.json"
+  },
+  "run_id": "smoke",
+  "sprint": "0",
+  "started_at": 1771590780,
+  "task": "73"
+}

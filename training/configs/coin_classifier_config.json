@@ -1,0 +1,11 @@
+{
+  "task": "95",
+  "project": "INFO8665",
+  "sprint": "0",
+  "seed": 2026,
+  "classes": [
+    "penny",
+    "nickel"
+  ],
+  "notes": "Sprint 0 coin classifier config used for deterministic smoke outputs."
+}

@@ -1,0 +1,33 @@
+{
+  "accuracy": 1.0,
+  "class_map_check": {
+    "count": 2,
+    "duplicates": [],
+    "has_duplicates": false,
+    "is_sorted": false,
+    "sorted": [
+      "nickel",
+      "penny"
+    ],
+    "unique_count": 2
+  },
+  "config_hash": "ccb411e6d953aa7286d31130a5048021eb76183bb3429091e5db33cdb2f8e525",
+  "finished_at": 1771590334,
+  "mode": "smoke",
+  "model_path": "C:/Users/femil/Documents/PersonalProjects/SMC_data/INFO8665/training/outputs/coin_classifier/smoke/model.json",
+  "per_class": {
+    "nickel": {
+      "correct": 3,
+      "total": 3
+    },
+    "penny": {
+      "correct": 3,
+      "total": 3
+    }
+  },
+  "run_id": "smoke",
+  "sprint": "0",
+  "started_at": 1771590334,
+  "task": "95",
+  "total": 6
+}
