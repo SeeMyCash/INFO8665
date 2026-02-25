@@ -1,0 +1,14 @@
+{
+  "source_checkpoint": "INFO8665/outputs/models/champ-bill-20260223-225355__model.pt",
+  "classes": [
+    "CAD_10",
+    "CAD_100",
+    "CAD_20",
+    "CAD_5",
+    "CAD_50"
+  ],
+  "image_size": 256,
+  "backbone": "resnet18",
+  "quantization": "dynamic_int8_linear",
+  "torchscript": "INFO8665/outputs/models/bill_classifier_quantized.ts.pt"
+}

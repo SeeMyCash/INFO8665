@@ -1,5 +1,5 @@
 # Task 76 — YOLO training environment reproducibility
-# Implemented for Sprint 0 by: Oluwafemi Lawal <Olawal7308@conestogac.on.ca>
+# Implemented for Sprint 0 by: Oluwafemi Lawal
 
 # Intentionally minimal for reproducibility and fast setup.
 # The Sprint 0 smoke path uses only the Python standard library.
