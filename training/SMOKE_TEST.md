@@ -1,4 +1,4 @@
-<!-- Task 76 — implemented for Sprint 0 by Oluwafemi Lawal <Olawal7308@conestogac.on.ca> -->
+<!-- Task 76 — implemented for Sprint 0 by Oluwafemi Lawal -->
 
 # Training Smoke Test (Sprint 0)
 

@@ -1,6 +1,6 @@
 # Task 76 — YOLO training environment reproducibility
 # Task 73 — Train detector end-to-end
-# Implemented for Sprint 0 by: Jarius Bedward <Jbedward1640@conestogac.on.ca>
+# Implemented for Sprint 0 by: Jarius Bedward
 
 from __future__ import annotations
 

@@ -1,34 +1,49 @@
-# INFO8665
+# INFO8665 — Local Data Engineering + Training
 
-This repository follows a simple, policy-driven workflow:
+This folder documents a local-first data engineering workflow:
 
-- Long-lived branches:
-  - main: last UAT/QA release
-  - stable: production release
-- Short-lived branches:
-  - dev-<ID>: sprint work
-  - exp-<ID>: experiments
-  - auto/third-party: dependency automation (e.g., dependabot)
+1. Download source datasets automatically from Roboflow Universe.
+2. Load + clean + normalize datasets into consistent local layouts.
+3. Run basic EDA checks (counts, class balance, sanity visuals).
+4. Train locally (detector + coin classifier).
+5. (Optional) Run cloud training using the discovered best hyperparameters.
 
-Workflow (branch -> PR -> merge):
+No hard-coded secrets belong in this repo. For Roboflow downloads, set `ROBOFLOW_API_KEY` in your environment.
 
-1. Create dev-<ID> from main.
-2. Work on dev-<ID>.
-3. Open a PR dev-<ID> -> main, review, merge.
-4. Promote to production with a PR main -> stable.
-5. Tag production releases from stable as tag-YY.MM.PATCH.
+## Where to start
 
-Environment mapping:
+- Data sources + download: `data-collection/README.md`
+- Local processing + EDA steps: `documentation/local_data_workflow.md`
+- Training (local + optional cloud): `training/README.md`
+- Branching/promotion conventions: `documentation/workflow.md`
 
-- dev-* -> Test (DEV server lane, Test Container)
-- main -> UAT/QA (QA Container)
-- stable -> Production (PROD Container)
+For the standalone INFO8665 repo structure:
 
-Repository layout:
+- Configs: `configs/`
+- Scripts: `scripts/`
+- Local data (ignored by git): `data/`
+- Local outputs (ignored by git): `outputs/`
 
-/README.md
-/orchestrator.ipynb
-/data-collection/
-/training/
-/dev/
-/documentation/
+## Repo layout (within INFO8665)
+
+- `data-collection/` — dataset sources and how they are downloaded locally
+- `documentation/` — workflow docs (local data workflow + branching)
+- `training/` — training/eval instructions (local-first) + optional cloud path
+- `dev/` — scratch entrypoints for local experiments
+- `orchestrator.ipynb` — legacy notebook (branching workflow automation)
+
+## Docker
+
+Build (from inside this repo folder):
+
+- `docker build -t info8665-local .`
+
+Run the Sprint0 smoke checks (no datasets required):
+
+- `docker run --rm info8665-local python training/train_detector.py --smoke`
+- `docker run --rm info8665-local python training/eval_detector.py --smoke`
+- `docker run --rm info8665-local python training/coin_classifier/train_coin_classifier.py --smoke`
+
+Roboflow download (requires `ROBOFLOW_API_KEY` passed at runtime; never commit it):
+
+- `docker run --rm -e ROBOFLOW_API_KEY="<your_key>" info8665-local python scripts/01_download_from_universe.py`

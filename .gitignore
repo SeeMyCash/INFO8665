@@ -1,0 +1,12 @@
+# Local data + outputs
+data/
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db

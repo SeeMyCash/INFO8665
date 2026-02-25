@@ -1,0 +1,59 @@
+canonical_classes: ["CAD_5", "CAD_10", "CAD_20", "CAD_50", "CAD_100"]
+
+# map many possible source names → canonical
+map:
+  # Numeric-only
+  "5": "CAD_5"
+  "10": "CAD_10"
+  "20": "CAD_20"
+  "50": "CAD_50"
+  "100": "CAD_100"
+
+  # Dollar sign prefix
+  "$5": "CAD_5"
+  "$10": "CAD_10"
+  "$20": "CAD_20"
+  "$50": "CAD_50"
+  "$100": "CAD_100"
+
+  # "N CAD" format (cad1 dataset)
+  "5 CAD": "CAD_5"
+  "10 CAD": "CAD_10"
+  "20 CAD": "CAD_20"
+  "50 CAD": "CAD_50"
+  "100 CAD": "CAD_100"
+
+  # lowercase cadN
+  "cad5": "CAD_5"
+  "cad10": "CAD_10"
+  "cad20": "CAD_20"
+  "cad50": "CAD_50"
+  "cad100": "CAD_100"
+
+  # "Ndollar" format (canada-currency dataset)
+  "5dollar": "CAD_5"
+  "10dollar": "CAD_10"
+  "20dollar": "CAD_20"
+  "50dollar": "CAD_50"
+  "100dollar": "CAD_100"
+
+  # "N-Dollar" format (money-and-coins dataset)
+  "5-Dollar": "CAD_5"
+  "10-Dollar": "CAD_10"
+  "20-Dollar": "CAD_20"
+  "50-Dollar": "CAD_50"
+  "100-Dollar": "CAD_100"
+
+  # "NCanadaDollar" format (canada-10 dataset)
+  "5CanadaDollar": "CAD_5"
+  "10CanadaDollar": "CAD_10"
+  "20CanadaDollar": "CAD_20"
+  "50CanadaDollar": "CAD_50"
+  "100CanadaDollar": "CAD_100"
+
+  # Additional variants
+  "CAD_5": "CAD_5"
+  "CAD_10": "CAD_10"
+  "CAD_20": "CAD_20"
+  "CAD_50": "CAD_50"
+  "CAD_100": "CAD_100"
