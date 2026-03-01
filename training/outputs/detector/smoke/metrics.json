@@ -1,0 +1,18 @@
+{
+  "class_map_check": {
+    "count": 3,
+    "duplicates": [],
+    "has_duplicates": false,
+    "is_sorted": true,
+    "sorted": [
+      "banknote",
+      "coin",
+      "confuser"
+    ],
+    "unique_count": 3
+  },
+  "final_loss": 0.106529,
+  "run_id": "smoke",
+  "seed": 1337,
+  "steps": 10
+}

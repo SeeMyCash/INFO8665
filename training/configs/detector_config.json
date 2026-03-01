@@ -1,0 +1,12 @@
+{
+  "task": "73",
+  "project": "INFO8665",
+  "sprint": "0",
+  "seed": 1337,
+  "classes": [
+    "banknote",
+    "coin",
+    "confuser"
+  ],
+  "notes": "Sprint 0 detector config used for deterministic smoke outputs."
+}
