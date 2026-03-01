@@ -1,5 +1,5 @@
 # Task 77 — Evaluation summary + stability checks
-# Implemented for Sprint 0 by: Cemil Caglar Yapici <Cyapici1058@conestogac.on.ca>
+# Implemented for Sprint 0 by: Cemil Caglar Yapici
 
 from __future__ import annotations
 
