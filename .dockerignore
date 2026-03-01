@@ -1,0 +1,10 @@
+# Keep images small
+.git/
+.vscode/
+__pycache__/
+*.pyc
+.venv/
+
+# Local-only artifacts
+data/
+outputs/
