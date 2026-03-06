@@ -5,9 +5,9 @@ Pipeline endpoints – status, stats, auto-select, refresh, and inference.
 import io
 import logging
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from PIL import Image
 
 from app.schemas.responses import (
@@ -29,7 +29,7 @@ from app.services.pipeline import (
     run_full_process,
     server_start_time,
 )
-from app.services.s3_sync import refresh_from_deploy_defaults
+from app.services.s3_sync import aws_model_sync_reason, refresh_from_deploy_defaults
 import app.services.pipeline as _pl
 
 logger = logging.getLogger("smc.pipeline")
@@ -118,6 +118,15 @@ def auto_select():
 )
 def refresh_defaults():
     """Refresh models from S3 using deploy defaults — no body required."""
+    reason = aws_model_sync_reason()
+    if reason is not None:
+        return {
+            "refreshed": False,
+            "reason": reason,
+            "available_models": list_local_models(),
+            "pipeline": pipeline_status(),
+        }
+
     try:
         result = refresh_from_deploy_defaults()
     except Exception as exc:
@@ -160,7 +169,10 @@ def refresh_defaults():
         "Returns detector results, the chosen target, and the classification result."
     ),
 )
-async def infer(file: UploadFile = File(..., description="JPEG or PNG image file")):
+async def infer(
+    file: UploadFile = File(..., description="JPEG or PNG image file"),
+    top_k_targets: Optional[str] = Form(None, description="Number of top detection targets to classify (1–5)"),
+):
     # ── Validate content type early ──────────────────────────
     if file.content_type and file.content_type not in (
         "image/jpeg", "image/png", "image/webp", "image/bmp",
@@ -194,9 +206,17 @@ async def infer(file: UploadFile = File(..., description="JPEG or PNG image file
                 detail="Pipeline models are not loaded. Call /api/pipeline/auto_select or /api/pipeline/refresh first.",
             )
 
+    requested_top_k = 1
+    if top_k_targets is not None and str(top_k_targets).strip() != "":
+        try:
+            requested_top_k = int(str(top_k_targets).strip())
+        except Exception:
+            requested_top_k = 1
+    requested_top_k = max(1, min(requested_top_k, 5))
+
     t0 = time.time()
     try:
-        result = run_full_process(image)
+        result = run_full_process(image, top_k_targets=requested_top_k)
     except HTTPException:
         _pl.inference_errors += 1
         raise

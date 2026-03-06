@@ -6,10 +6,22 @@ import tarfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import boto3
+try:
+    import boto3  # type: ignore
+except Exception:
+    boto3 = None
 
 from app.core.config import settings
 from app.services.model_manager import list_local_models
+
+
+def aws_model_sync_reason() -> Optional[str]:
+    """Return a human-readable reason if AWS model sync is unavailable, else None."""
+    if not settings.enable_aws_model_sync:
+        return "AWS model sync disabled via ENABLE_AWS_MODEL_SYNC=0."
+    if boto3 is None:
+        return "boto3 is not installed; install boto3 to enable AWS model sync."
+    return None
 
 
 def _extract_model_tarball(tar_path: Path, target_name: str) -> Optional[Path]:
@@ -47,6 +59,9 @@ def sync_models_from_s3(
     region: str,
 ) -> Dict[str, Any]:
     """Download and extract model tarballs from S3."""
+    reason = aws_model_sync_reason()
+    if reason is not None:
+        raise RuntimeError(reason)
     s3 = boto3.client("s3", region_name=region)
 
     paginator = s3.get_paginator("list_objects_v2")
@@ -87,10 +102,12 @@ def read_deploy_text(name: str) -> Optional[str]:
 
 
 def refresh_from_deploy_defaults(
-    max_models: int = 30,
+    max_models: int = 250,
     region: Optional[str] = None,
 ) -> bool:
     """Attempt to sync models from S3 using deploy-time defaults."""
+    if aws_model_sync_reason() is not None:
+        return False
     bucket = read_deploy_text("models_bucket.txt")
     if not bucket:
         return False

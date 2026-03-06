@@ -67,13 +67,32 @@ def list_local_models() -> List[str]:
 
 
 def parse_run_tag(name: str) -> Optional[datetime]:
-    m = re.search(r"(\d{8}-\d{6})", name)
-    if not m:
-        return None
-    try:
-        return datetime.strptime(m.group(1), "%Y%m%d-%H%M%S")
-    except Exception:
-        return None
+    # Supported name encodings:
+    # 1) YYYYMMDD-HHMMSS (e.g. champ-detector-20260224-185203)
+    # 2) YYMMDDHHMMSS   (e.g. p2amt-coin-260301215339)
+    # 3) YYYYMMDD       (fallback date-only)
+    m = re.search(r"(?<!\d)(\d{8}-\d{6})(?!\d)", name)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%Y%m%d-%H%M%S")
+        except Exception:
+            pass
+
+    m = re.search(r"(?<!\d)(\d{12})(?!\d)", name)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%y%m%d%H%M%S")
+        except Exception:
+            pass
+
+    m = re.search(r"(?<!\d)(\d{8})(?!\d)", name)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%Y%m%d")
+        except Exception:
+            pass
+
+    return None
 
 
 def pick_latest(candidates: List[str]) -> Optional[str]:
@@ -126,6 +145,33 @@ def is_bill_reader_name(model_name: str) -> bool:
         or "banknote" in n
         or "bill" in n
     )
+
+
+# ── Pipeline pin-file helpers ────────────────────────────────
+
+def pipeline_pin_file_name(role: str) -> Optional[str]:
+    mapping = {
+        "detector": "pipeline_detector_model.txt",
+        "bill_reader": "pipeline_bill_reader_model.txt",
+        "coin_classifier": "pipeline_coin_classifier_model.txt",
+    }
+    return mapping.get(role)
+
+
+def pick_pipeline_preferred_or_latest(
+    role: str,
+    candidates: List[str],
+    read_deploy_text_fn: Any = None,
+) -> Optional[str]:
+    """Pick pinned model if available, otherwise fall back to latest."""
+    if not candidates:
+        return None
+    pin_name = pipeline_pin_file_name(role)
+    if pin_name and read_deploy_text_fn is not None:
+        preferred = read_deploy_text_fn(pin_name)
+        if preferred and preferred in candidates:
+            return preferred
+    return pick_latest(candidates)
 
 
 # ── Load model (returns instance) ───────────────────────────

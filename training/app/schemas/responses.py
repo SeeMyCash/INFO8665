@@ -40,8 +40,14 @@ class ConfigDefaults(BaseModel):
     artifacts_prefix: Optional[str] = None
 
 
+class AwsModelSync(BaseModel):
+    enabled: bool = True
+    reason: Optional[str] = None
+
+
 class ConfigResponse(BaseModel):
     defaults: ConfigDefaults
+    aws_model_sync: Optional[AwsModelSync] = None
 
 
 # ── Pipeline ─────────────────────────────────────────────────
@@ -65,6 +71,7 @@ class PipelineAutoSelectResponse(BaseModel):
 
 class PipelineRefreshResponse(BaseModel):
     refreshed: bool
+    reason: Optional[str] = None
     available_models: List[str]
     pipeline: Dict[str, Optional[str]]
 
