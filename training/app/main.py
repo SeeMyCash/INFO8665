@@ -23,7 +23,7 @@ import app.services.pipeline as _pl
 logger = logging.getLogger("smc")
 
 
-# ── OpenAPI tag metadata ─────────────────────────────────────
+# -- OpenAPI tag metadata --
 
 OPENAPI_TAGS = [
     {
@@ -33,7 +33,7 @@ OPENAPI_TAGS = [
     {
         "name": "Pipeline",
         "description": (
-            "Automatic multi-model pipeline: detector ➜ bill reader / coin classifier. "
+            "Automatic multi-model pipeline: detector -> bill reader / coin classifier. "
             "Use **/api/pipeline/infer** to run the full detection-and-classification flow on an image."
         ),
     },
@@ -48,7 +48,7 @@ OPENAPI_TAGS = [
 ]
 
 
-# ── Application factory ─────────────────────────────────────
+# -- Application factory --
 
 def create_app() -> FastAPI:
     """Build and return the FastAPI application instance."""
@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
         description=(
             "REST API for the **See My Cash** project.\n\n"
             "Provides:\n"
-            "- Automatic **pipeline inference** (detector ➜ bill reader / coin classifier)\n"
+            "- Automatic **pipeline inference** (detector -> bill reader / coin classifier)\n"
             "- Manual single-model inference (detector *or* classifier)\n"
             "- Model management (list / select / sync from S3)\n\n"
             "Upload a JPEG/PNG image to `/api/pipeline/infer` for end-to-end money recognition."
@@ -68,7 +68,7 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
-    # ── Middleware ────────────────────────────────────────────
+    # -- Middleware --
     application.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -77,7 +77,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ── Static file mounts ───────────────────────────────────
+    # -- Static file mounts --
     if settings.static_dir.is_dir():
         application.mount(
             "/static",
@@ -94,10 +94,10 @@ def create_app() -> FastAPI:
         if rn_assets.is_dir():
             application.mount("/assets", StaticFiles(directory=rn_assets), name="rn_assets")
 
-    # ── API router (versioned) ───────────────────────────────
+    # -- API router (versioned) --
     application.include_router(v1_router, prefix="/api")
 
-    # ── Global exception handlers ────────────────────────────
+    # -- Global exception handlers --
     @application.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         """Return a consistent JSON error envelope for all HTTPExceptions."""
@@ -108,7 +108,7 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
-        """Catch-all for unhandled errors — always return 500 with detail."""
+        """Catch-all for unhandled errors -- always return 500 with detail."""
         logger.error(
             "Unhandled exception on %s %s: %s\n%s",
             request.method,
@@ -121,7 +121,7 @@ def create_app() -> FastAPI:
             content={"detail": "Internal server error. Check server logs for details."},
         )
 
-    # ── Lifecycle events ─────────────────────────────────────
+    # -- Lifecycle events --
     @application.on_event("startup")
     def _startup_event():
         _pl.server_start_time = time.time()
@@ -131,7 +131,7 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning(f"Could not auto-load pipeline on startup: {exc}")
 
-    # ── Root / SPA routes ────────────────────────────────────
+    # -- Root / SPA routes --
     @application.get("/", include_in_schema=False)
     def root_index():
         """Serve the main web UI (static/index.html)."""
@@ -140,7 +140,7 @@ def create_app() -> FastAPI:
     @application.get("/rn", include_in_schema=False)
     @application.get("/rn/{rest_of_path:path}", include_in_schema=False)
     def rn_index(rest_of_path: str = ""):
-        """Serve the React Native (Expo web) SPA — all client routes return index.html."""
+        """Serve the React Native (Expo web) SPA -- all client routes return index.html."""
         rn_html = rn_dir / "index.html"
         if not rn_html.is_file():
             raise HTTPException(
@@ -151,7 +151,7 @@ def create_app() -> FastAPI:
     return application
 
 
-# ── App instance (used by uvicorn: `app.main:app`) ──────────
+# -- App instance (used by uvicorn: `app.main:app`) --
 
 app = create_app()
 

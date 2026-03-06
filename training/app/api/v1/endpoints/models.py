@@ -14,7 +14,7 @@ from app.schemas.responses import (
     ModelsRefreshResponse,
 )
 from app.services.model_manager import list_local_models, load_active_model, model_state
-from app.services.s3_sync import sync_models_from_s3
+from app.services.s3_sync import aws_model_sync_reason, sync_models_from_s3
 
 logger = logging.getLogger("smc.models")
 
@@ -74,6 +74,9 @@ def select_model(req: SelectModelRequest):
     description="Download model tarballs from the specified S3 bucket/prefix and extract them locally.",
 )
 def refresh_models(req: RefreshRequest):
+    reason = aws_model_sync_reason()
+    if reason is not None:
+        raise HTTPException(status_code=400, detail=reason)
     if not req.artifacts_bucket or not req.artifacts_bucket.strip():
         raise HTTPException(status_code=400, detail="artifacts_bucket must not be empty")
     try:
