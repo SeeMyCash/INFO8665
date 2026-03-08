@@ -12,6 +12,9 @@ export type Settings = {
     confidenceThreshold: number;
     cameraResolution: 'low' | 'medium' | 'high';
     liveFps: number;
+    liveStabilityWindowSec: number;
+    liveStabilityMinFrames: number;
+    liveStabilityIou: number;
     ttsEnabled: boolean;
     ttsSpeed: number;
     darkMode: boolean;
@@ -26,6 +29,9 @@ const DEFAULT_SETTINGS: Settings = {
     confidenceThreshold: 0.25,
     cameraResolution: 'medium',
     liveFps: 1,
+    liveStabilityWindowSec: 3,
+    liveStabilityMinFrames: 3,
+    liveStabilityIou: 0.45,
     ttsEnabled: true,
     ttsSpeed: 1.0,
     darkMode: true,
