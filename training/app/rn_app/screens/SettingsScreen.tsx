@@ -191,6 +191,21 @@ export default function SettingsScreen() {
                 {renderRow('Live FPS', `${settings.liveFps} frame/sec`,
                     renderThreshold([1, 2, 3, 5], settings.liveFps, (v) => update({ liveFps: v }))
                 )}
+                {renderRow(
+                    'Stability Window',
+                    `${settings.liveStabilityWindowSec}s confirmation window`,
+                    renderThreshold([1, 2, 3, 4, 5], settings.liveStabilityWindowSec, (v) => update({ liveStabilityWindowSec: v }))
+                )}
+                {renderRow(
+                    'Min Stable Frames',
+                    `${settings.liveStabilityMinFrames} consecutive frames required`,
+                    renderThreshold([2, 3, 4, 5, 6], settings.liveStabilityMinFrames, (v) => update({ liveStabilityMinFrames: v }))
+                )}
+                {renderRow(
+                    'Box IoU Match',
+                    `${Math.round(settings.liveStabilityIou * 100)}% overlap required`,
+                    renderThreshold([0.3, 0.45, 0.6, 0.75], settings.liveStabilityIou, (v) => update({ liveStabilityIou: v }))
+                )}
             </>, 180)}
 
             {/* TTS */}
