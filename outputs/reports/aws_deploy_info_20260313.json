@@ -1,0 +1,80 @@
+{
+  "prefix": "output",
+  "jobs": {
+    "detector": {
+      "training_job": "phase2-amt-det-20260301-130911-008-900e563f",
+      "status": "Completed",
+      "s3_model_artifact": "s3://smc-phase2-artifacts-redacted/output/phase2-amt-det-20260301-130911-008-900e563f/output/model.tar.gz",
+      "s3_head_ok": true,
+      "s3_head_error": null,
+      "final_metrics": [
+        {
+          "MetricName": "val_mAP50",
+          "Value": 0.9458460211753845
+        },
+        {
+          "MetricName": "ObjectiveMetric",
+          "Value": 0.9458460211753845
+        },
+        {
+          "MetricName": "val_mAP50_95",
+          "Value": 0.7362890243530273
+        }
+      ]
+    },
+    "bill": {
+      "training_job": "p2amt-bill-260301130911-008-78f64f3f",
+      "status": "Completed",
+      "s3_model_artifact": "s3://smc-phase2-artifacts-redacted/output/p2amt-bill-260301130911-008-78f64f3f/output/model.tar.gz",
+      "s3_head_ok": true,
+      "s3_head_error": null,
+      "final_metrics": [
+        {
+          "MetricName": "val_loss",
+          "Value": 0.5022510290145874
+        },
+        {
+          "MetricName": "ObjectiveMetric",
+          "Value": 0.7340819835662842
+        },
+        {
+          "MetricName": "train_loss",
+          "Value": 0.2821919918060303
+        },
+        {
+          "MetricName": "val_accuracy",
+          "Value": 0.7340819835662842
+        },
+        {
+          "MetricName": "best_val_accuracy",
+          "Value": 0.749064028263092
+        }
+      ]
+    },
+    "coin": {
+      "training_job": "p2amt-coin-260301215339-008-f6efd6da",
+      "status": "Stopped",
+      "s3_model_artifact": "s3://smc-phase2-artifacts-redacted/output/p2amt-coin-260301215339-008-f6efd6da/output/model.tar.gz",
+      "s3_head_ok": true,
+      "s3_head_error": null,
+      "final_metrics": [
+        {
+          "MetricName": "val_loss",
+          "Value": 1.7038990259170532
+        },
+        {
+          "MetricName": "ObjectiveMetric",
+          "Value": 0.6961179971694946
+        },
+        {
+          "MetricName": "train_loss",
+          "Value": 0.3659619987010956
+        },
+        {
+          "MetricName": "val_accuracy",
+          "Value": 0.6961179971694946
+        }
+      ]
+    }
+  }
+}
