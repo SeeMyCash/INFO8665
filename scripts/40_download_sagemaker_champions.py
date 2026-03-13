@@ -19,7 +19,10 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
-import boto3
+try:
+    import boto3  # type: ignore
+except Exception:
+    boto3 = None
 
 
 def _repo_root() -> Path:
@@ -100,6 +103,11 @@ def main() -> int:
     parser.add_argument("--no-extract", action="store_true")
     parser.add_argument("--no-flatten", action="store_true")
     args = parser.parse_args()
+
+    if boto3 is None:
+        raise SystemExit(
+            "boto3 is required for this optional AWS script. Install it with: pip install boto3"
+        )
 
     out_root = Path(args.out_root)
     flat_out = Path(args.flat_out)

@@ -10,18 +10,9 @@ import { useAnimatedCounter } from '../hooks/useAnimatedCounter';
 import { useToast } from '../components/Toast';
 import { spacing, radii, shadows } from '../theme';
 
-const DENOM_VALUES: Record<string, number> = {
-    CAD_5: 5, CAD_10: 10, CAD_20: 20, CAD_50: 50, CAD_100: 100,
-};
-
 function formatTime(ts: number) {
     const d = new Date(ts);
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function computeTotal(detections: any[]): number {
-    if (!detections) return 0;
-    return detections.reduce((sum: number, d: any) => sum + (DENOM_VALUES[d.class_name] || 0), 0);
 }
 
 function CounterStat({ value, label, color, prefix, tc, typ }: {
@@ -40,7 +31,7 @@ function CounterStat({ value, label, color, prefix, tc, typ }: {
 
 function EntryCard({ entry, tc, typ }: { entry: HistoryEntry; tc: any; typ: any }) {
     const detCount = entry.detections?.length || 0;
-    const total = entry.totalValue ?? computeTotal(entry.detections);
+    const total = Number(entry.totalValue ?? 0);
     const hasError = !!entry.error;
 
     return (
@@ -67,8 +58,8 @@ function EntryCard({ entry, tc, typ }: { entry: HistoryEntry; tc: any; typ: any 
                         <Text style={[typ.caption, { color: tc.textMuted }]}>Dets</Text>
                     </View>
                     <View style={{ alignItems: 'center' }}>
-                        <Text style={[typ.h1, { color: tc.accent }]}>${total.toFixed(0)}</Text>
-                        <Text style={[typ.caption, { color: tc.textMuted }]}>Total</Text>
+                        <Text style={[typ.h1, { color: tc.accent }]}>${total.toFixed(2)}</Text>
+                        <Text style={[typ.caption, { color: tc.textMuted }]}>Guaranteed</Text>
                     </View>
                     <View style={styles.classesWrap}>
                         {entry.detections?.slice(0, 4).map((d: any, i: number) => (
@@ -92,7 +83,7 @@ export default function HistoryScreen() {
 
     const sessionTotal = entries.reduce((sum, e) => {
         if (e.error) return sum;
-        return sum + (e.totalValue ?? computeTotal(e.detections));
+        return sum + Number(e.totalValue ?? 0);
     }, 0);
     const successCount = entries.filter((e) => !e.error).length;
 

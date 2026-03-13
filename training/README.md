@@ -87,3 +87,13 @@ This writes:
 To compare an old vs new champion on frozen packs (objective metrics + confusers + latency/size proxies):
 
 Promotion comparisons are project-specific and are not duplicated into this standalone repo copy.
+
+## Local inference app defaults
+
+`training/app/main.py` now runs local-first by default.
+
+- It prioritizes local model files in `training/app/models`.
+- It tries AWS/S3 refresh when AWS is available/configured.
+- If AWS is unavailable, it falls back to local models automatically.
+- You can force-disable AWS attempts with `ENABLE_AWS_MODEL_SYNC=0`.
+- AWS refresh needs `boto3` (`pip install boto3`).

@@ -14,7 +14,7 @@ from app.schemas.responses import (
 )
 from app.services.model_manager import list_local_models, model_state
 from app.services.pipeline import ensure_pipeline_models, pipeline_status, server_start_time
-from app.services.s3_sync import read_deploy_text
+from app.services.s3_sync import aws_model_sync_reason, read_deploy_text
 
 import time
 
@@ -85,9 +85,14 @@ def get_version():
     description="Returns default S3 bucket/prefix read from deploy text files.",
 )
 def get_config():
+    reason = aws_model_sync_reason()
     return {
         "defaults": {
             "artifacts_bucket": read_deploy_text("models_bucket.txt"),
             "artifacts_prefix": read_deploy_text("models_prefix.txt"),
-        }
+        },
+        "aws_model_sync": {
+            "enabled": reason is None,
+            "reason": reason,
+        },
     }
