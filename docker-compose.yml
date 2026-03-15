@@ -1,0 +1,36 @@
+# Docker Compose for INFO8665 – See My Cash Inference API
+# Usage:
+#   docker compose up --build
+#   docker compose run --rm tests
+
+services:
+  api:
+    build:
+      context: ./training
+      dockerfile: Dockerfile
+    container_name: smc-inference-api
+    ports:
+      - "8080:8080"
+    environment:
+      - ENABLE_AWS_MODEL_SYNC=0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 5
+
+  tests:
+    build:
+      context: ./training
+      dockerfile: Dockerfile
+    container_name: smc-e2e-tests
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - ENABLE_AWS_MODEL_SYNC=0
+      - TEST_BASE_URL=http://api:8080
+    entrypoint: ["pytest", "app/tests/", "-v", "--tb=short"]
+    profiles:
+      - test
