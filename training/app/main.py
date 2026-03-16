@@ -33,7 +33,7 @@ OPENAPI_TAGS = [
     {
         "name": "Pipeline",
         "description": (
-            "Automatic multi-model pipeline: detector -> bill reader / coin classifier. "
+            "Automatic multi-model pipeline: spoof guard -> detector -> bill reader / coin classifier. "
             "Use **/api/pipeline/infer** to run the full detection-and-classification flow on an image."
         ),
     },
@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
         description=(
             "REST API for the **See My Cash** project.\n\n"
             "Provides:\n"
-            "- Automatic **pipeline inference** (detector -> bill reader / coin classifier)\n"
+            "- Automatic **pipeline inference** (spoof guard -> detector -> bill reader / coin classifier)\n"
             "- Manual single-model inference (detector *or* classifier)\n"
             "- Model management (list / select / sync from S3)\n\n"
             "Upload a JPEG/PNG image to `/api/pipeline/infer` for end-to-end money recognition."
@@ -131,16 +131,33 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.warning(f"Could not auto-load pipeline on startup: {exc}")
 
-    # -- Root / SPA routes --
-    @application.get("/", include_in_schema=False)
-    def root_index():
-        """Serve the main web UI (static/index.html)."""
-        return FileResponse(settings.static_dir / "index.html")
+    # -- UI routes --
+    reserved_root_prefixes = (
+        "api",
+        "docs",
+        "redoc",
+        "openapi.json",
+        "static",
+        "_expo",
+        "assets",
+        "rn",
+    )
+
+    def _is_reserved_root_path(path: str) -> bool:
+        return any(path == prefix or path.startswith(f"{prefix}/") for prefix in reserved_root_prefixes)
 
     @application.get("/rn", include_in_schema=False)
     @application.get("/rn/{rest_of_path:path}", include_in_schema=False)
+    def static_index(rest_of_path: str = ""):
+        """Serve the legacy web UI (static/index.html) under /rn."""
+        return FileResponse(settings.static_dir / "index.html")
+
+    @application.get("/", include_in_schema=False)
+    @application.get("/{rest_of_path:path}", include_in_schema=False)
     def rn_index(rest_of_path: str = ""):
-        """Serve the React Native (Expo web) SPA -- all client routes return index.html."""
+        """Serve the React Native (Expo web) SPA at root -- all client routes return index.html."""
+        if rest_of_path and _is_reserved_root_path(rest_of_path):
+            raise HTTPException(status_code=404, detail="Not found")
         rn_html = rn_dir / "index.html"
         if not rn_html.is_file():
             raise HTTPException(
