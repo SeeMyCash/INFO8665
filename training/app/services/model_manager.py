@@ -147,6 +147,19 @@ def is_bill_reader_name(model_name: str) -> bool:
     )
 
 
+def is_spoof_guard_name(model_name: str) -> bool:
+    n = model_name.lower()
+    if not n.endswith(".pt"):
+        return False
+    return (
+        "spoof" in n
+        or "antispoof" in n
+        or "anti_spoof" in n
+        or "liveness" in n
+        or "screen-guard" in n
+    )
+
+
 # ── Pipeline pin-file helpers ────────────────────────────────
 
 def pipeline_pin_file_name(role: str) -> Optional[str]:
@@ -154,6 +167,7 @@ def pipeline_pin_file_name(role: str) -> Optional[str]:
         "detector": "pipeline_detector_model.txt",
         "bill_reader": "pipeline_bill_reader_model.txt",
         "coin_classifier": "pipeline_coin_classifier_model.txt",
+        "spoof_guard": "pipeline_spoof_guard_model.txt",
     }
     return mapping.get(role)
 
@@ -203,6 +217,7 @@ def load_model_instance(model_name: str) -> LoadedModel:
                 "classes": classes,
                 "image_size": image_size,
                 "backbone": backbone,
+                "normalize_imagenet": bool(ckpt.get("normalize_imagenet", False)),
             },
         )
 
@@ -266,6 +281,7 @@ def load_active_model(model_name: str) -> None:
             "classes": classes,
             "image_size": image_size,
             "backbone": backbone,
+            "normalize_imagenet": bool(ckpt.get("normalize_imagenet", False)),
         }
         return
 
