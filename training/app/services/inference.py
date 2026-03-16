@@ -15,6 +15,9 @@ from torchvision import transforms
 from app.core.config import settings
 from app.services.model_manager import LoadedModel, model_state
 
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
 
 # ── Classifier (legacy active-model) ────────────────────────
 
@@ -24,10 +27,13 @@ def predict_classifier(image: Image.Image) -> Dict[str, Any]:
     if meta is None:
         raise HTTPException(status_code=500, detail="Classifier metadata unavailable")
 
-    tfm = transforms.Compose([
+    tfm_steps = [
         transforms.Resize((meta["image_size"], meta["image_size"])),
         transforms.ToTensor(),
-    ])
+    ]
+    if bool(meta.get("normalize_imagenet", False)):
+        tfm_steps.append(transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD))
+    tfm = transforms.Compose(tfm_steps)
 
     x = tfm(image).unsqueeze(0)
     with torch.no_grad():
@@ -50,10 +56,13 @@ def predict_classifier_instance(loaded: LoadedModel, image: Image.Image) -> Dict
     if loaded.meta is None:
         raise HTTPException(status_code=500, detail="Classifier metadata unavailable")
 
-    tfm = transforms.Compose([
+    tfm_steps = [
         transforms.Resize((loaded.meta["image_size"], loaded.meta["image_size"])),
         transforms.ToTensor(),
-    ])
+    ]
+    if bool(loaded.meta.get("normalize_imagenet", False)):
+        tfm_steps.append(transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD))
+    tfm = transforms.Compose(tfm_steps)
 
     x = tfm(image).unsqueeze(0)
     with torch.no_grad():
