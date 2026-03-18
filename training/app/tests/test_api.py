@@ -67,6 +67,13 @@ class TestModelEndpoints:
 class TestPipelineEndpoints:
     """Verify pipeline read-only routes respond correctly."""
 
+    def test_pipeline_status_has_spoof_guard_slot(self):
+        resp = client.get("/api/pipeline/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "pipeline" in data
+        assert "spoof_guard" in data["pipeline"]
+
     def test_pipeline_stats(self):
         resp = client.get("/api/pipeline/stats")
         assert resp.status_code == 200

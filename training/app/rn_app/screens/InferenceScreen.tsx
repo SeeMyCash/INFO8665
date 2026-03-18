@@ -283,6 +283,7 @@ export default function InferenceScreen() {
     );
 
     const pipelineModels = useMemo(() => effectiveResult?.result?.pipeline_models || null, [effectiveResult]);
+    const spoofCheck = useMemo(() => effectiveResult?.result?.spoof_check || null, [effectiveResult]);
     const topCandidates = useMemo(
         () => (Array.isArray(result?.result?.candidates) ? result?.result?.candidates : []),
         [result],
@@ -422,6 +423,7 @@ export default function InferenceScreen() {
         uri: string | null,
         opts?: { skipHistory?: boolean; isLive?: boolean },
     ) {
+        fd.append('spoof_guard_enabled', settings.screenSpoofGuardEnabled ? 'true' : 'false');
         const skipHistory = Boolean(opts?.skipHistory);
         const isLive = Boolean(opts?.isLive);
         setBusy(true);
@@ -762,6 +764,30 @@ export default function InferenceScreen() {
             )}
 
             {/* ── Error ── */}
+            {spoofCheck?.suspected && (
+                <View
+                    style={[
+                        styles.banner,
+                        shadows.card,
+                        {
+                            backgroundColor: tc.warning + '15',
+                            borderColor: tc.warning + '33',
+                        },
+                    ]}
+                >
+                    <Ionicons
+                        name={spoofCheck?.blocked ? 'shield-outline' : 'warning-outline'}
+                        size={18}
+                        color={tc.warning}
+                    />
+                    <Text style={[typ.body, { color: tc.warning, flex: 1 }]}>
+                        {spoofCheck?.blocked
+                            ? 'Possible screen spoofing attack detected. Detector was blocked for safety.'
+                            : 'Possible spoofing risk detected. Please point camera at real currency.'}
+                    </Text>
+                </View>
+            )}
+
             {result?.error && (
                 <View style={[styles.banner, shadows.card, { backgroundColor: tc.error + '15', borderColor: tc.error + '33' }]}>
                     <Ionicons name="alert-circle" size={18} color={tc.error} />

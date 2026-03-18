@@ -10,7 +10,8 @@
     <main class="container">
       <h1>SMC Model Inference</h1>
       <p class="subtitle">
-        Select a model, then run inference from upload or camera.
+        Refresh models from S3, then run the full process (detect -> bill reader
+        / coin classifier) from upload or camera.
       </p>
       <div id="statusBanner" class="status status-neutral">Ready</div>
 
@@ -46,9 +47,13 @@
       <section class="card">
         <h2>Upload Image</h2>
         <p class="hint">
-          Upload a single image file for one-shot inference. Detector boxes are
-          rendered on the preview.
+          Upload a single image file for one-shot pipeline inference. Box labels
+          use classifier output when available.
         </p>
+        <label class="field" style="max-width: 300px; margin-bottom: 8px">
+          <span>Screen Spoof Protection</span>
+          <input id="spoofGuardEnabled" type="checkbox" />
+        </label>
         <input
           type="file"
           id="fileInput"

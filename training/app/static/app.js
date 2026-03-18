@@ -18,6 +18,7 @@ const startCamBtn = document.getElementById('startCamBtn');
 let stopCamBtn = document.getElementById('stopCamBtn');
 const captureBtn = document.getElementById('captureBtn');
 const toggleLiveBtn = document.getElementById('toggleLiveBtn');
+const spoofGuardEnabled = document.getElementById('spoofGuardEnabled');
 
 let liveTimer = null;
 let cameraStream = null;
@@ -153,7 +154,9 @@ function drawDetections(ctx, detections) {
     const [x1, y1, x2, y2] = detection.xyxy;
     const width = x2 - x1;
     const height = y2 - y1;
-    const label = `${detection.class_name} ${(detection.confidence * 100).toFixed(1)}%`;
+    const tag = detection.display_name || detection.class_name || 'unknown';
+    const conf = Number(detection.confidence || 0);
+    const label = `${tag} ${(conf * 100).toFixed(1)}%`;
 
     ctx.strokeStyle = '#00e676';
     ctx.lineWidth = lineWidth;
@@ -194,7 +197,7 @@ function renderVideoDetections(detections) {
 
 function renderUploadDetections(resultData) {
   if (!uploadOverlay || !uploadPreview) return;
-  const detections = resultData?.result?.detections || [];
+  const detections = getDetections(resultData);
   uploadOverlay.classList.remove('hidden');
   uploadOverlay.width = uploadPreview.naturalWidth;
   uploadOverlay.height = uploadPreview.naturalHeight;
@@ -202,6 +205,14 @@ function renderUploadDetections(resultData) {
   const ctx = uploadOverlay.getContext('2d');
   ctx.clearRect(0, 0, uploadOverlay.width, uploadOverlay.height);
   drawDetections(ctx, detections);
+}
+
+function getDetections(resultData) {
+  const det = resultData?.result?.detector?.detections;
+  if (Array.isArray(det)) return det;
+  const legacy = resultData?.result?.detections;
+  if (Array.isArray(legacy)) return legacy;
+  return [];
 }
 
 async function refreshModels() {
@@ -259,7 +270,9 @@ async function activateModel() {
 async function inferBlob(blob) {
   const fd = new FormData();
   fd.append('file', blob, 'frame.jpg');
-  const data = await api('/api/infer', { method: 'POST', body: fd });
+  fd.append('top_k_targets', '5');
+  fd.append('spoof_guard_enabled', spoofGuardEnabled?.checked ? 'true' : 'false');
+  const data = await api('/api/pipeline/infer', { method: 'POST', body: fd });
   showResult(data);
   return data;
 }
@@ -288,7 +301,8 @@ async function inferUpload() {
   });
 
   const data = await inferBlob(fileInput.files[0]);
-  if (data.kind === 'detector') {
+  const detections = getDetections(data);
+  if (detections.length > 0) {
     renderUploadDetections(data);
   } else {
     if (uploadOverlay) uploadOverlay.classList.add('hidden');
@@ -352,8 +366,9 @@ async function captureAndInfer() {
   const blob = await new Promise(resolve => captureCanvas.toBlob(resolve, 'image/jpeg', 0.9));
   const data = await inferBlob(blob);
 
-  if (data.kind === 'detector') {
-    renderVideoDetections(data?.result?.detections || []);
+  const detections = getDetections(data);
+  if (detections.length > 0) {
+    renderVideoDetections(detections);
   } else {
     clearCanvas(videoOverlay);
   }

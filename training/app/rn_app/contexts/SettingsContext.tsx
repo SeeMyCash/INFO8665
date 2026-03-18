@@ -10,6 +10,7 @@ const STORAGE_KEY = '@smc/settings';
 export type Settings = {
     apiBaseUrl: string;
     confidenceThreshold: number;
+    screenSpoofGuardEnabled: boolean;
     cameraResolution: 'low' | 'medium' | 'high';
     liveFps: number;
     liveStabilityWindowSec: number;
@@ -27,6 +28,7 @@ export type Settings = {
 const DEFAULT_SETTINGS: Settings = {
     apiBaseUrl: (process.env.EXPO_PUBLIC_API_BASE_URL as string | undefined) || (typeof window !== 'undefined' ? window.location.origin : 'https://smc.femilawal.com'),
     confidenceThreshold: 0.25,
+    screenSpoofGuardEnabled: false,
     cameraResolution: 'medium',
     liveFps: 1,
     liveStabilityWindowSec: 3,
