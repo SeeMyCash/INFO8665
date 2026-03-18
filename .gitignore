@@ -1,12 +1,33 @@
 # Local data + outputs
 data/
+outputs/datasets/
+outputs/tmp/
 node_modules/
 
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
 .venv/
+dist/
+
+# Model weights (tracked via LFS or release artifacts)
+# Already-committed champion weights are grandfathered in
+# *.pt
 
 # OS
 .DS_Store
 Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Scratch / one-off scripts
+commit_changes.sh
+
+# ADO automation artifacts
+recent_change_ownership_from_ado.md

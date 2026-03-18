@@ -40,6 +40,24 @@ Optional quantized artifact:
 
 - `python scripts/26_quantize_classifier_torchscript.py --checkpoint outputs/models/bill_classifier_local.pt --out outputs/models/bill_classifier_quantized.ts.pt --meta-out outputs/models/bill_classifier_quantized.meta.json`
 
+### Spoof guard classifier (pre-detector screen attack defense)
+
+Train a binary classifier with classes like `real` and `spoof`:
+
+- `python scripts/28_train_spoof_guard.py --train-dir data/processed/spoof_guard/train --val-dir data/processed/spoof_guard/val --output outputs/models/spoof-guard-20260315__model.pt`
+
+Evaluate with a deployment threshold:
+
+- `python scripts/29_eval_spoof_guard.py --model outputs/models/spoof-guard-20260315__model.pt --test-dir data/processed/spoof_guard/test --threshold 0.80 --report-out outputs/reports/spoof_guard_eval_local.json`
+
+Deploy by copying/renaming into `training/models/` with a classifier-style name (for auto-discovery):
+
+- `spoof-guard-<run-tag>__model.pt`
+
+Optional pin file (for explicit pipeline selection):
+
+- `pipeline_spoof_guard_model.txt`
+
 ## Detector evaluation (bills + coins)
 
 Run objective detector validation on the unified money dataset:
@@ -64,9 +82,26 @@ Detector quantization command (fallback path):
 
 ## Optional cloud training (SageMaker)
 
-This INFO8665 repo copy is intended to be shareable and local-first, so SageMaker orchestration is not duplicated here.
+Screen detector fine-tune path now included:
 
-If you add a cloud training path later, keep it configuration-driven (runtime files + env vars) and never embed credentials or account identifiers in code.
+- Build dataset: `python scripts/30_prepare_screen_dataset_from_coco128.py`
+- Submit training: `python scripts/31_submit_sagemaker_screen_yolo.py --bucket <S3_BUCKET_WITH_ROLE_ACCESS> --instance-type ml.m5.xlarge`
+
+Latest evaluated screen-guard detector:
+
+- Model: `training/models/screen-guard-detector-20260316-064336__model.pt`
+- SageMaker job: `screen-yolo-ft-20260316-064336-2026-03-16-10-43-36-582`
+- Metrics (validation):
+  - `precision`: `0.768`
+  - `recall`: `0.493`
+  - `mAP@0.50`: `0.591`
+  - `mAP@0.50:0.95`: `0.429`
+- Report: `training/reports/screen_guard_detector_report.json`
+
+Notes:
+
+- `31_submit_sagemaker_screen_yolo.py` uploads the dataset and submits a PyTorch Script Mode job.
+- The SageMaker role needs `s3:ListBucket/GetObject` on dataset prefix and `s3:PutObject` on output prefix.
 
 ## Download trained champions (AWS)
 
@@ -97,3 +132,6 @@ Promotion comparisons are project-specific and are not duplicated into this stan
 - If AWS is unavailable, it falls back to local models automatically.
 - You can force-disable AWS attempts with `ENABLE_AWS_MODEL_SYNC=0`.
 - AWS refresh needs `boto3` (`pip install boto3`).
+- Pre-detector spoof checks are disabled by default (`SPOOF_GUARD_ENABLED=0`).
+- RN app users can manually enable it in Settings -> Security -> Screen Spoof Protection.
+- You can tune behavior with `SPOOF_GUARD_THRESHOLD`, `SPOOF_GUARD_HEURISTIC_ONLY_THRESHOLD`, and `SPOOF_GUARD_BLOCK_ON_DETECT`.

@@ -1,11 +1,11 @@
 """
-Pipeline endpoints – status, stats, auto-select, refresh, and inference.
+Pipeline endpoints - status, stats, auto-select, refresh, and inference.
 """
 
 import io
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from PIL import Image
@@ -21,13 +21,8 @@ from app.schemas.responses import (
 from app.services.model_manager import list_local_models
 from app.services.pipeline import (
     ensure_pipeline_models,
-    inference_count,
-    inference_errors,
-    inference_total_ms,
-    last_inference_ms,
     pipeline_status,
     run_full_process,
-    server_start_time,
 )
 from app.services.s3_sync import aws_model_sync_reason, refresh_from_deploy_defaults
 import app.services.pipeline as _pl
@@ -35,6 +30,19 @@ import app.services.pipeline as _pl
 logger = logging.getLogger("smc.pipeline")
 
 router = APIRouter()
+
+
+def _parse_optional_bool(raw: Optional[str]) -> Optional[bool]:
+    if raw is None:
+        return None
+    txt = str(raw).strip().lower()
+    if txt == "":
+        return None
+    if txt in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if txt in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return None
 
 
 @router.get(
@@ -45,7 +53,7 @@ router = APIRouter()
     },
     tags=["Pipeline"],
     summary="Pipeline model status",
-    description="Shows which detector, bill reader, and coin classifier are currently loaded in the pipeline.",
+    description="Shows which detector, bill reader, coin classifier, and optional spoof guard are loaded.",
 )
 def status():
     pipeline_error = None
@@ -69,7 +77,6 @@ def status():
     description="Aggregate inference count, error count, average latency, and server uptime.",
 )
 def stats():
-    """Server-side inference statistics."""
     avg = round(_pl.inference_total_ms / _pl.inference_count, 1) if _pl.inference_count > 0 else None
     return {
         "inference_count": _pl.inference_count,
@@ -98,7 +105,6 @@ def auto_select():
     try:
         return {"pipeline": ensure_pipeline_models(allow_refresh_from_defaults=True)}
     except HTTPException as exc:
-        # Promote "model not found" to 503 Service Unavailable
         if exc.status_code == 400:
             raise HTTPException(status_code=503, detail=exc.detail) from exc
         raise
@@ -117,7 +123,7 @@ def auto_select():
     description="Downloads the latest model artifacts from S3 using deploy-time defaults, then returns updated model list.",
 )
 def refresh_defaults():
-    """Refresh models from S3 using deploy defaults — no body required."""
+    """Refresh models from S3 using deploy defaults - no body required."""
     reason = aws_model_sync_reason()
     if reason is not None:
         return {
@@ -163,17 +169,21 @@ def refresh_defaults():
     summary="Run full pipeline inference",
     description=(
         "Upload a JPEG/PNG image. The pipeline runs:\n\n"
-        "1. **Detector** — locates money objects in the image\n"
-        "2. **Target selection** — picks the highest-confidence detection\n"
-        "3. **Classifier** — crops the target and classifies it as a bill denomination or coin type\n\n"
-        "Returns detector results, the chosen target, and the classification result."
+        "0. **Spoof guard** - checks if the frame looks like a screen/replay attack\n"
+        "1. **Detector** - locates money objects in the image\n"
+        "2. **Target selection** - picks the highest-confidence detection\n"
+        "3. **Classifier** - crops the target and classifies it as a bill denomination or coin type\n\n"
+        "Returns spoof-check output, detector results, the chosen target, and classification output."
     ),
 )
 async def infer(
     file: UploadFile = File(..., description="JPEG or PNG image file"),
-    top_k_targets: Optional[str] = Form(None, description="Number of top detection targets to classify (1–5)"),
+    top_k_targets: Optional[str] = Form(None, description="Number of top detection targets to classify (1-5)"),
+    spoof_guard_enabled: Optional[str] = Form(
+        None,
+        description="Optional override for spoof guard (true/false). If omitted, server default is used.",
+    ),
 ):
-    # ── Validate content type early ──────────────────────────
     if file.content_type and file.content_type not in (
         "image/jpeg", "image/png", "image/webp", "image/bmp",
         "application/octet-stream",
@@ -195,7 +205,6 @@ async def infer(
         _pl.inference_errors += 1
         raise HTTPException(status_code=400, detail=f"Cannot decode image: {exc}")
 
-    # ── Ensure pipeline is ready ─────────────────────────────
     if _pl._pipeline_detector is None or _pl._pipeline_bill_reader is None or _pl._pipeline_coin_classifier is None:
         try:
             ensure_pipeline_models(allow_refresh_from_defaults=True)
@@ -213,10 +222,21 @@ async def infer(
         except Exception:
             requested_top_k = 1
     requested_top_k = max(1, min(requested_top_k, 5))
+    spoof_override = _parse_optional_bool(spoof_guard_enabled)
+    if spoof_guard_enabled is not None and spoof_override is None:
+        _pl.inference_errors += 1
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid spoof_guard_enabled value. Use true/false.",
+        )
 
     t0 = time.time()
     try:
-        result = run_full_process(image, top_k_targets=requested_top_k)
+        result = run_full_process(
+            image,
+            top_k_targets=requested_top_k,
+            spoof_guard_enabled=spoof_override,
+        )
     except HTTPException:
         _pl.inference_errors += 1
         raise

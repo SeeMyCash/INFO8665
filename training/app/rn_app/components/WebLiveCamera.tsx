@@ -21,6 +21,7 @@ import { View, Text, Platform } from 'react-native';
 export type Detection = {
     class_id?: number;
     class_name?: string;
+    display_name?: string;
     confidence?: number;
     xyxy?: number[];
 };
@@ -48,6 +49,11 @@ const CLASS_COLORS: Record<string, string> = {
     CAD_50: '#F59E0B',
     CAD_100: '#EF4444',
     COIN: '#94A3B8',
+    LOONIE: '#22C55E',
+    TOONIE: '#EAB308',
+    NICKEL: '#60A5FA',
+    DIME: '#A78BFA',
+    QUARTER: '#F97316',
 };
 
 /* ── Component ───────────────────────────────── */
@@ -209,9 +215,10 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
             const bw = (x2 - x1) * scale;
             const bh = (y2 - y1) * scale;
 
-            const color = CLASS_COLORS[det.class_name || ''] || '#A78BFA';
+            const tag = String(det.display_name || det.class_name || '?');
+            const color = CLASS_COLORS[tag] || CLASS_COLORS[det.class_name || ''] || '#A78BFA';
             const conf = det.confidence != null ? Math.round(det.confidence * 100) : 0;
-            const label = `${det.class_name || '?'} ${conf}%`;
+            const label = `${tag} ${conf}%`;
 
             // Box
             ctx.lineWidth = 3;

@@ -713,6 +713,36 @@ def _crop_xyxy(image: Image.Image, xyxy: list[float]) -> Image.Image:
     return image.crop((left, top, right, bottom))
 
 
+def _top_prediction_label(classification: Optional[dict[str, Any]]) -> Optional[str]:
+    if not isinstance(classification, dict):
+        return None
+    result = classification.get("result")
+    if not isinstance(result, dict):
+        return None
+    preds = result.get("top_predictions")
+    if not isinstance(preds, list) or not preds:
+        return None
+    first = preds[0] if isinstance(preds[0], dict) else {}
+    label = str(first.get("class", "")).strip()
+    return label or None
+
+
+def _top_prediction_confidence(classification: Optional[dict[str, Any]]) -> Optional[float]:
+    if not isinstance(classification, dict):
+        return None
+    result = classification.get("result")
+    if not isinstance(result, dict):
+        return None
+    preds = result.get("top_predictions")
+    if not isinstance(preds, list) or not preds:
+        return None
+    first = preds[0] if isinstance(preds[0], dict) else {}
+    try:
+        return float(first.get("confidence"))
+    except Exception:
+        return None
+
+
 def run_full_process(image: Image.Image) -> dict[str, Any]:
     if _pipeline_detector is None or _pipeline_bill_reader is None or _pipeline_coin_classifier is None:
         _ensure_pipeline_models(allow_refresh_from_defaults=True)
@@ -747,6 +777,15 @@ def run_full_process(image: Image.Image) -> dict[str, Any]:
             "kind": "coin_classifier",
             "result": _predict_classifier_instance(_pipeline_coin_classifier, crop),
         }
+
+    label = _top_prediction_label(out.get("classification"))
+    if label:
+        target["display_name"] = label
+        conf = _top_prediction_confidence(out.get("classification"))
+        if conf is not None:
+            target["display_confidence"] = conf
+        out["target"] = {k: v for k, v in target.items() if k != "_target_kind"}
+
     return out
 
 
@@ -808,7 +847,7 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# ── React Native (Expo web) app — served at /rn ──
+# ── React Native (Expo web) app — served at root (/) ──
 # The Expo web export references /_expo/… and /assets/… with root-relative paths
 # inside the bundled JS, so we mount those directories at the root level.
 if RN_DIR.is_dir():
@@ -832,18 +871,18 @@ def _startup_event():
         logger.warning(f"Could not auto-load pipeline on startup: {exc}")
 
 
-# ── Static / index ──
-
-@app.get("/", include_in_schema=False)
-def root_index():
-    """Serve the main web UI (static/index.html)."""
-    return FileResponse(STATIC_DIR / "index.html")
-
+# ── UI routes ──
 
 @app.get("/rn", include_in_schema=False)
 @app.get("/rn/{rest_of_path:path}", include_in_schema=False)
-def rn_index(rest_of_path: str = ""):
-    """Serve the React Native (Expo web) SPA — all client routes return index.html."""
+def static_index(rest_of_path: str = ""):
+    """Serve the main web UI (static/index.html) under /rn."""
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/", include_in_schema=False)
+def rn_index():
+    """Serve the React Native (Expo web) SPA at root."""
     rn_html = RN_DIR / "index.html"
     if not rn_html.is_file():
         raise HTTPException(status_code=404, detail="React Native web build not found")

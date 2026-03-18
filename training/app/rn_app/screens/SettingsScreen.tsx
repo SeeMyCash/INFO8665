@@ -178,6 +178,22 @@ export default function SettingsScreen() {
                 )}
             </>, 120)}
 
+            {/* Security */}
+            {renderSection('Security', 'shield-checkmark-outline', <>
+                {renderRow(
+                    'Screen Spoof Protection',
+                    'Use the screen-guard model before detector inference (manual opt-in).',
+                    (
+                        <Switch
+                            value={settings.screenSpoofGuardEnabled}
+                            onValueChange={(v) => update({ screenSpoofGuardEnabled: v })}
+                            trackColor={switchTrack(settings.screenSpoofGuardEnabled, tc.warning)}
+                            thumbColor={switchThumb(settings.screenSpoofGuardEnabled, tc.warning)}
+                        />
+                    )
+                )}
+            </>, 150)}
+
             {/* Camera */}
             {renderSection('Camera', 'videocam-outline', <>
                 {renderRow('Resolution',
