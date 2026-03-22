@@ -65,6 +65,7 @@ def maybe_flatten(extracted_dir: Path, job_name: str, flat_dir: Path) -> list[Pa
 
     candidates = [
         extracted_dir / "model.pt",
+        extracted_dir / "train" / "weights" / "best.pt",
         extracted_dir / "weights" / "best.pt",
         extracted_dir / "best.pt",
     ]

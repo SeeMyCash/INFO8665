@@ -91,14 +91,31 @@ def sync_models_from_s3(
 
 
 def read_deploy_text(name: str) -> Optional[str]:
-    """Read a single-line deploy text file from DEPLOY_ROOT."""
-    try:
-        p = (settings.deploy_root / name).resolve()
-        if not p.exists():
-            return None
-        return p.read_text(encoding="utf-8").strip() or None
-    except Exception:
-        return None
+    """Read a single-line deploy text file from known deploy roots.
+
+    Search order:
+    1. `settings.deploy_root` (legacy behavior)
+    2. current working directory
+    3. parent of `models_dir` (works for Docker at /training)
+    """
+    candidates = [
+        (settings.deploy_root / name).resolve(),
+        (Path.cwd() / name).resolve(),
+        (settings.models_dir.parent / name).resolve(),
+    ]
+    seen = set()
+    for p in candidates:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if not p.exists():
+                continue
+            return p.read_text(encoding="utf-8").strip() or None
+        except Exception:
+            continue
+    return None
 
 
 def refresh_from_deploy_defaults(

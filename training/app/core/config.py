@@ -12,7 +12,9 @@ from pydantic_settings import BaseSettings
 
 
 def _default_models_dir() -> Path:
-    return Path(Path.cwd() / "models").resolve()
+    # Prefer the canonical training/models directory regardless of launcher CWD.
+    app_dir = Path(__file__).resolve().parent.parent  # .../training/app
+    return (app_dir.parent / "models").resolve()
 
 
 def _default_rn_dir() -> Path:

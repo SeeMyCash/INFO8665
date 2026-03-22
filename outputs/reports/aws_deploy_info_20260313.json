@@ -23,58 +23,88 @@
       ]
     },
     "bill": {
-      "training_job": "p2amt-bill-260301130911-008-78f64f3f",
+      "training_job": "p2amt-bill-260301130911-003-7404d154",
       "status": "Completed",
-      "s3_model_artifact": "s3://smc-phase2-artifacts-redacted/output/p2amt-bill-260301130911-008-78f64f3f/output/model.tar.gz",
+      "s3_model_artifact": "s3://smc-phase2-artifacts-redacted/output/p2amt-bill-260301130911-003-7404d154/output/model.tar.gz",
       "s3_head_ok": true,
       "s3_head_error": null,
       "final_metrics": [
         {
           "MetricName": "val_loss",
-          "Value": 0.5022510290145874
+          "Value": 0.4292129874229431
         },
         {
           "MetricName": "ObjectiveMetric",
-          "Value": 0.7340819835662842
+          "Value": 0.7453179955482483
         },
         {
           "MetricName": "train_loss",
-          "Value": 0.2821919918060303
+          "Value": 0.24148300290107727
         },
         {
           "MetricName": "val_accuracy",
-          "Value": 0.7340819835662842
+          "Value": 0.7453179955482483
         },
         {
           "MetricName": "best_val_accuracy",
-          "Value": 0.749064028263092
+          "Value": 0.7528089880943298
         }
       ]
     },
     "coin": {
-      "training_job": "p2amt-coin-260301215339-008-f6efd6da",
-      "status": "Stopped",
-      "s3_model_artifact": "s3://smc-phase2-artifacts-redacted/output/p2amt-coin-260301215339-008-f6efd6da/output/model.tar.gz",
+      "training_job": "p2amt-coin-260301215339-001-819c769d",
+      "status": "Completed",
+      "s3_model_artifact": "s3://smc-phase2-artifacts-redacted/output/p2amt-coin-260301215339-001-819c769d/output/model.tar.gz",
       "s3_head_ok": true,
       "s3_head_error": null,
       "final_metrics": [
         {
           "MetricName": "val_loss",
-          "Value": 1.7038990259170532
+          "Value": 0.8669049739837646
         },
         {
           "MetricName": "ObjectiveMetric",
-          "Value": 0.6961179971694946
+          "Value": 0.8135460019111633
         },
         {
           "MetricName": "train_loss",
-          "Value": 0.3659619987010956
+          "Value": 0.1959410011768341
         },
         {
           "MetricName": "val_accuracy",
-          "Value": 0.6961179971694946
+          "Value": 0.8135460019111633
+        },
+        {
+          "MetricName": "best_val_accuracy",
+          "Value": 0.8182560205459595
         }
       ]
+    },
+    "spoof_guard": {
+      "training_job": "screen-yolo-ft-20260316-064336-2026-03-16-10-43-36-582",
+      "status": "Completed",
+      "s3_model_artifact": "s3://smc-phase2-artifacts-redacted/screen-detection/models/screen-yolo-ft-20260316-064336-2026-03-16-10-43-36-582/output/model.tar.gz",
+      "s3_head_ok": true,
+      "s3_head_error": null,
+      "final_metrics": [
+        {
+          "MetricName": "precision",
+          "Value": 0.768
+        },
+        {
+          "MetricName": "recall",
+          "Value": 0.493
+        },
+        {
+          "MetricName": "mAP@0.50",
+          "Value": 0.591
+        },
+        {
+          "MetricName": "mAP@0.50:0.95",
+          "Value": 0.429
+        }
+      ],
+      "metrics_source": "cloudwatch_training_log"
     }
   }
 }
