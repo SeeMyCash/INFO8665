@@ -31,8 +31,37 @@ type PipelineResponse = {
 
 const DENOM_VALUES: Record<string, number> = {
     CAD_5: 5, CAD_10: 10, CAD_20: 20, CAD_50: 50, CAD_100: 100,
-    CAD_5C: 0.05, CAD_10C: 0.10, CAD_25C: 0.25, CAD_0_05: 0.05, CAD_0_10: 0.10, CAD_0_25: 0.25,
-    CAD_1: 1, CAD_2: 2, LOONIE: 1, TOONIE: 2, NICKEL: 0.05, DIME: 0.10, QUARTER: 0.25,
+    CAD_1C: 0.01, CAD_5C: 0.05, CAD_10C: 0.10, CAD_25C: 0.25, CAD_0_01: 0.01, CAD_0_05: 0.05, CAD_0_10: 0.10, CAD_0_25: 0.25,
+    CAD_1: 1, CAD_2: 2, PENNY: 0.01, LOONIE: 1, TOONIE: 2, NICKEL: 0.05, DIME: 0.10, QUARTER: 0.25,
+};
+const COIN_NUMERIC_CLASS_ALIASES: Record<string, string> = {
+    // Current pinned coin classifier uses numeric class labels (0..5).
+    '0': 'PENNY',
+    '1': 'NICKEL',
+    '2': 'DIME',
+    '3': 'QUARTER',
+    '4': 'LOONIE',
+    '5': 'TOONIE',
+};
+const DENOM_ALIASES: Record<string, string> = {
+    ONECENT: 'PENNY',
+    ONE_CENT: 'PENNY',
+    '1CENT': 'PENNY',
+    '1_CENT': 'PENNY',
+    FIVECENT: 'NICKEL',
+    FIVE_CENT: 'NICKEL',
+    '5CENT': 'NICKEL',
+    '5_CENT': 'NICKEL',
+    TENCENT: 'DIME',
+    TEN_CENT: 'DIME',
+    '10CENT': 'DIME',
+    '10_CENT': 'DIME',
+    TWENTYFIVECENT: 'QUARTER',
+    TWENTY_FIVE_CENT: 'QUARTER',
+    '25CENT': 'QUARTER',
+    '25_CENT': 'QUARTER',
+    CAD_01: 'CAD_0_01',
+    CAD_05: 'CAD_0_05',
 };
 const GUARANTEED_CLASSIFIER_MIN_CONF = 0.70;
 
@@ -137,11 +166,26 @@ function _isStableMatch(a: StableTarget, b: StableTarget, iouThreshold: number):
     return _iou(a.xyxy, b.xyxy) >= iouThreshold;
 }
 
-function _classToCadValue(classNameRaw: unknown): number {
+function _normalizeCurrencyClassName(classNameRaw: unknown): string {
     const className = String(classNameRaw || '').trim().toUpperCase();
-    if (!className) return 0;
+    if (!className) return '';
 
     const compact = className.replace(/\s+/g, '').replace(/-/g, '_');
+    if (DENOM_ALIASES[compact] !== undefined) return String(DENOM_ALIASES[compact]);
+    if (COIN_NUMERIC_CLASS_ALIASES[compact] !== undefined) return String(COIN_NUMERIC_CLASS_ALIASES[compact]);
+
+    const coinIdx = compact.match(/^(?:COIN|CLASS|IDX|LABEL)_?([0-9]{1,2})$/);
+    if (coinIdx) {
+        const mapped = COIN_NUMERIC_CLASS_ALIASES[coinIdx[1]];
+        if (mapped) return mapped;
+    }
+
+    return compact;
+}
+
+function _classToCadValue(classNameRaw: unknown): number {
+    const compact = _normalizeCurrencyClassName(classNameRaw);
+    if (!compact) return 0;
     if (DENOM_VALUES[compact] !== undefined) return Number(DENOM_VALUES[compact]);
 
     const wholeCad = compact.match(/^CAD_?(\d{1,3})$/);
@@ -197,7 +241,8 @@ function _computeGuaranteedClassifierSummary(res: PipelineResponse | null): {
             if (!top1) return null;
             const confidence = Number(top1?.confidence || 0);
             if (confidence < GUARANTEED_CLASSIFIER_MIN_CONF) return null;
-            const className = String(top1?.class || '').trim();
+            const classNameRaw = String(top1?.class || '').trim();
+            const className = _normalizeCurrencyClassName(classNameRaw) || classNameRaw;
             const value = _classToCadValue(className);
             if (!(value > 0)) return null;
             return {
@@ -801,57 +846,64 @@ export default function InferenceScreen() {
                     title={`Detections (${detections.length}${allDetections.length > detections.length ? ` of ${allDetections.length}` : ''})`}
                     icon="locate-outline"
                 >
+                    <View style={[styles.sectionHint, { backgroundColor: tc.primary + '12', borderColor: tc.primary + '35' }]}>
+                        <Ionicons name="scan-outline" size={14} color={tc.primary} />
+                        <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                            Labels below are from the detector stage (bounding-box model).
+                        </Text>
+                    </View>
                     {detections.map((det: any, i: number) => (
                         <DetectionCard key={i} detection={det} index={i} />
                     ))}
                 </SectionCard>
             )}
 
-            {topCandidates.length > 1 && (
+            {topCandidates.length > 0 && (
                 <SectionCard title={`Top Candidates (${topCandidates.length})`} icon="layers-outline">
+                    <View style={[styles.sectionHint, { backgroundColor: tc.accent + '12', borderColor: tc.accent + '35' }]}>
+                        <Ionicons name="information-circle-outline" size={14} color={tc.accent} />
+                        <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                            Top row = detector class. Bottom row = classifier class for the cropped candidate.
+                        </Text>
+                    </View>
                     {topCandidates.map((cand: any, i: number) => {
                         const target = cand?.target || {};
                         const conf = Number(target?.confidence || 0);
                         const top1 = cand?.classification?.result?.top_predictions?.[0] || null;
+                        const detectorClass = String(target?.class_name || '?');
+                        const classifierClassRaw = top1 ? String(top1.class) : '';
+                        const classifierClass = top1
+                            ? (_normalizeCurrencyClassName(classifierClassRaw) || classifierClassRaw)
+                            : 'No classifier route';
+                        const classifierConf = top1 ? `${(Number(top1.confidence || 0) * 100).toFixed(1)}%` : 'Skipped';
                         return (
                             <View key={i} style={[styles.candidateCard, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}>
-                                <Text style={[typ.bodyBold, { color: tc.textPrimary }]}>
-                                    {`#${cand?.rank || i + 1} ${String(target?.class_name || '?')} ${(conf * 100).toFixed(1)}%`}
-                                </Text>
+                                <View style={styles.candidateHeaderRow}>
+                                    <View style={[styles.candidateChip, { borderColor: tc.primary + '55', backgroundColor: tc.primary + '1A' }]}>
+                                        <Text style={[styles.candidateChipText, { color: tc.primary }]}>DETECTOR</Text>
+                                    </View>
+                                    <Text style={[typ.bodyBold, { color: tc.textPrimary }]}>{`#${cand?.rank || i + 1}`}</Text>
+                                </View>
+                                <Text style={[styles.candidateClassText, { color: tc.textPrimary }]}>{detectorClass}</Text>
                                 <Text style={[typ.caption, { color: tc.textSecondary }]}>
-                                    {top1
-                                        ? `${String(top1.class)} ${(Number(top1.confidence || 0) * 100).toFixed(1)}%`
-                                        : 'No classifier route'}
+                                    {`Confidence ${(conf * 100).toFixed(1)}%`}
                                 </Text>
+
+                                <View style={[styles.candidateDivider, { backgroundColor: tc.border }]} />
+
+                                <View style={styles.candidateHeaderRow}>
+                                    <View style={[styles.candidateChip, { borderColor: tc.accent + '55', backgroundColor: tc.accent + '1A' }]}>
+                                        <Text style={[styles.candidateChipText, { color: tc.accent }]}>CLASSIFIER</Text>
+                                    </View>
+                                    <Text style={[typ.caption, { color: top1 ? tc.accent : tc.textMuted }]}>{`Top-1 ${classifierConf}`}</Text>
+                                </View>
+                                <Text style={[styles.candidateClassText, { color: top1 ? tc.accent : tc.textMuted }]}>{classifierClass}</Text>
                             </View>
                         );
                     })}
                 </SectionCard>
             )}
 
-            {/* ── Classification ── */}
-            {result?.result?.classification && (
-                <SectionCard title="Classification" icon="pricetag-outline">
-                    <View style={styles.classificationCard}>
-                        <Text style={[typ.bodyBold, { color: tc.textPrimary, marginBottom: spacing.xs }]}>
-                            {result.result.classification.kind === 'bill_reader' ? '💵 Bill Reader' : '🪙 Coin Classifier'}
-                        </Text>
-                        {result.result.classification.result?.top_predictions?.map((p: any, i: number) => (
-                            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-                                <Text style={[typ.mono, { color: tc.textPrimary, width: 100 }]}>{p.class}</Text>
-                                <View style={[styles.barTrack, { backgroundColor: tc.surfaceElevated }]}>
-                                    <View style={[styles.barFill, { width: `${Math.round(p.confidence * 100)}%`, backgroundColor: tc.accent }]} />
-                                </View>
-                                <Text style={[typ.mono, { color: tc.accent, width: 55, textAlign: 'right' }]}>
-                                    {(p.confidence * 100).toFixed(1)}%
-                                </Text>
-                            </View>
-                        ))}
-                    </View>
-                </SectionCard>
-            )}
-
-            {/* ── Debug panel ── */}
             {(result?.result?.classification || topCandidates.length > 0) && (
                 <SectionCard title="Guaranteed Amount" icon="cash-outline">
                     <View style={[styles.guaranteedCard, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}>
@@ -911,7 +963,16 @@ const styles = StyleSheet.create({
     previewCard: { borderRadius: radii.lg, overflow: 'hidden', borderWidth: 1 },
     previewImage: { width: '100%', height: 260 },
     banner: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: radii.md, borderWidth: 1 },
-    classificationCard: { gap: spacing.sm },
+    sectionHint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.xs,
+        borderWidth: 1,
+        borderRadius: radii.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs,
+        marginBottom: spacing.sm,
+    },
     guaranteedCard: { borderRadius: radii.md, borderWidth: 1, padding: spacing.md, gap: spacing.sm },
     guaranteedHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     guaranteedAmount: { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
@@ -926,6 +987,24 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
     },
     candidateCard: { borderRadius: radii.sm, borderWidth: 1, padding: spacing.sm, gap: spacing.xs, marginBottom: spacing.sm },
-    barTrack: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
-    barFill: { height: 6, borderRadius: 3 },
+    candidateHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    candidateChip: {
+        borderWidth: 1,
+        borderRadius: radii.full,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 2,
+    },
+    candidateChipText: {
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 0.5,
+    },
+    candidateClassText: {
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    candidateDivider: {
+        height: 1,
+        marginVertical: spacing.xs,
+    },
 });
