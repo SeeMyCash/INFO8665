@@ -2,6 +2,7 @@
 Health, version, and configuration endpoints.
 """
 
+import logging
 import torch
 from fastapi import APIRouter
 
@@ -19,6 +20,7 @@ from app.services.s3_sync import aws_model_sync_reason, read_deploy_text
 import time
 
 router = APIRouter()
+logger = logging.getLogger("smc.health")
 
 
 @router.get(
@@ -32,6 +34,7 @@ router = APIRouter()
     description="Returns server health, currently loaded model, available models, and pipeline status.",
 )
 def health():
+    logger.info("Health endpoint invoked.")
     pipeline_error = None
     try:
         pipeline = ensure_pipeline_models(allow_refresh_from_defaults=True)
