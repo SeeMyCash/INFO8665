@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.v1.router import router as v1_router
 from app.core.config import settings
@@ -21,6 +22,22 @@ from app.services.pipeline import ensure_pipeline_models
 import app.services.pipeline as _pl
 
 logger = logging.getLogger("smc")
+
+
+def configure_logging() -> None:
+    """Configure structured app logging once using the standard logging library."""
+    app_logger = logging.getLogger("smc")
+    if getattr(app_logger, "_smc_logging_configured", False):
+        return
+
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    app_logger.setLevel(logging.INFO)
+    app_logger.addHandler(handler)
+    app_logger.propagate = False
+    setattr(app_logger, "_smc_logging_configured", True)
 
 
 # -- OpenAPI tag metadata --
@@ -52,6 +69,9 @@ OPENAPI_TAGS = [
 
 def create_app() -> FastAPI:
     """Build and return the FastAPI application instance."""
+    configure_logging()
+    logger.info("Application initialization started.")
+
     application = FastAPI(
         title=settings.app_title,
         description=(
@@ -97,6 +117,14 @@ def create_app() -> FastAPI:
     # -- API router (versioned) --
     application.include_router(v1_router, prefix="/api")
 
+    # -- Prometheus metrics --
+    Instrumentator().instrument(application).expose(
+        application,
+        endpoint="/metrics",
+        include_in_schema=False,
+    )
+    logger.info("Prometheus metrics endpoint enabled at /metrics.")
+
     # -- Global exception handlers --
     @application.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
@@ -124,6 +152,7 @@ def create_app() -> FastAPI:
     # -- Lifecycle events --
     @application.on_event("startup")
     def _startup_event():
+        logger.info("Startup event triggered; initializing pipeline models.")
         _pl.server_start_time = time.time()
         try:
             ensure_pipeline_models(allow_refresh_from_defaults=True)
@@ -134,6 +163,7 @@ def create_app() -> FastAPI:
     # -- UI routes --
     reserved_root_prefixes = (
         "api",
+        "metrics",
         "docs",
         "redoc",
         "openapi.json",
