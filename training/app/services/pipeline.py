@@ -63,7 +63,11 @@ def _select_pipeline_models() -> Dict[str, Any]:
     global _pipeline_detector, _pipeline_bill_reader, _pipeline_coin_classifier, _pipeline_spoof_guard
 
     all_models = list_local_models()
-    detectors = [m for m in all_models if is_detector_name(m)]
+    # Keep spoof-guard detector artifacts out of the primary detector pool.
+    detectors = [
+        m for m in all_models
+        if is_detector_name(m) and not is_spoof_guard_name(m)
+    ]
     bill_readers = [m for m in all_models if is_bill_reader_name(m)]
     coin_classifiers = [m for m in all_models if is_coin_classifier_name(m)]
     spoof_guards = [m for m in all_models if is_spoof_guard_name(m)]
