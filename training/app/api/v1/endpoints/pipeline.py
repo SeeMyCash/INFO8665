@@ -184,6 +184,7 @@ async def infer(
         description="Optional override for spoof guard (true/false). If omitted, server default is used.",
     ),
 ):
+    logger.info("Pipeline infer request received (content_type=%s).", file.content_type)
     if file.content_type and file.content_type not in (
         "image/jpeg", "image/png", "image/webp", "image/bmp",
         "application/octet-stream",
@@ -195,6 +196,7 @@ async def infer(
         )
 
     payload = await file.read()
+    logger.info("Pipeline infer payload received (%d bytes).", len(payload))
     if not payload:
         _pl.inference_errors += 1
         raise HTTPException(status_code=400, detail="Empty file payload")
@@ -247,6 +249,7 @@ async def infer(
     _pl.inference_count += 1
     _pl.inference_total_ms += elapsed_ms
     _pl.last_inference_ms = elapsed_ms
+    logger.info("Pipeline infer completed in %.1fms.", elapsed_ms)
 
     return {
         "kind": "pipeline",

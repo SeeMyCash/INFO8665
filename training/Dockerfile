@@ -34,6 +34,9 @@ COPY app/static/ /training/app/static/
 # Place Expo web build where the app expects it (app/static/rn/)
 COPY app/rn_app/dist/ /training/app/static/rn/
 
+# Optional pinned pipeline model selectors
+COPY pipeline_*_model.txt /training/
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \

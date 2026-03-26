@@ -45,6 +45,23 @@ def build_model(backbone: str, num_classes: int):
     return model
 
 
+def build_label_remap(dataset_classes: list[str], model_classes: list[str]) -> tuple[torch.Tensor, list[str], list[str]]:
+    ds_classes = [str(c) for c in dataset_classes]
+    mdl_classes = [str(c) for c in model_classes]
+    model_to_idx = {name: i for i, name in enumerate(mdl_classes)}
+
+    missing_from_model = [name for name in ds_classes if name not in model_to_idx]
+    if missing_from_model:
+        raise SystemExit(
+            "Dataset classes missing from checkpoint classes: "
+            f"{missing_from_model}. "
+            f"dataset_classes={ds_classes} checkpoint_classes={mdl_classes}"
+        )
+
+    remap = torch.tensor([model_to_idx[name] for name in ds_classes], dtype=torch.long)
+    return remap, ds_classes, mdl_classes
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate bill classifier")
     parser.add_argument("--model", required=True)
@@ -63,7 +80,7 @@ def main() -> int:
     workers = resolve_workers(args.num_workers)
 
     ckpt = torch.load(args.model, map_location="cpu")
-    classes = ckpt["classes"]
+    classes = [str(c) for c in ckpt["classes"]]
     image_size = int(ckpt.get("image_size", 256))
     backbone = ckpt.get("backbone", "resnet18")
 
@@ -80,6 +97,7 @@ def main() -> int:
         ]
     )
     ds = datasets.ImageFolder(str(Path(args.test_dir)), transform=tfms)
+    label_remap, dataset_classes, model_classes = build_label_remap(ds.classes, classes)
     dl = DataLoader(
         ds,
         batch_size=int(args.batch_size),
@@ -88,25 +106,28 @@ def main() -> int:
         pin_memory=(device.type == "cuda"),
     )
 
-    n_classes = len(classes)
+    n_classes = len(model_classes)
     conf = np.zeros((n_classes, n_classes), dtype=np.int64)
     correct = 0
     total = 0
     with torch.no_grad():
         for images, labels in dl:
             images = images.to(device)
-            labels = labels.to(device)
+            labels_model_cpu = label_remap[labels.cpu()]
+            labels_model = labels_model_cpu.to(device)
             logits = model(images)
             pred = torch.softmax(logits, dim=1).argmax(dim=1)
-            correct += (pred == labels).sum().item()
-            total += labels.size(0)
-            for i in range(labels.size(0)):
-                conf[int(labels[i]), int(pred[i])] += 1
+            correct += int((pred == labels_model).sum().item())
+            total += int(labels_model.size(0))
+            for i in range(labels_model.size(0)):
+                conf[int(labels_model_cpu[i].item()), int(pred[i])] += 1
 
     overall = correct / max(total, 1)
     report = {
         "overall_accuracy": overall,
-        "classes": classes,
+        "classes": model_classes,
+        "dataset_classes": dataset_classes,
+        "dataset_to_model_index": {name: int(label_remap[idx]) for idx, name in enumerate(dataset_classes)},
         "confusion_matrix": conf.tolist(),
     }
     print(f"overall_acc={overall:.4f}")
