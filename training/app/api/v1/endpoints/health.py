@@ -15,7 +15,8 @@ from app.schemas.responses import (
 )
 from app.services.model_manager import list_local_models, model_state
 from app.services.pipeline import ensure_pipeline_models, pipeline_status, server_start_time
-from app.services.s3_sync import aws_model_sync_reason, read_deploy_text
+from app.services.s3_sync import aws_model_sync_reason, resolve_artifact_defaults
+from app.services.storage import get_inference_history_service
 
 import time
 
@@ -41,6 +42,9 @@ def health():
     except Exception as exc:
         pipeline = pipeline_status()
         pipeline_error = str(getattr(exc, "detail", exc))
+    storage = get_inference_history_service()
+    if not storage.ready:
+        storage.initialize()
 
     return {
         "ok": True,
@@ -49,6 +53,7 @@ def health():
         "available_models": list_local_models(),
         "pipeline": pipeline,
         "pipeline_error": pipeline_error,
+        "storage": storage.status(),
     }
 
 
@@ -89,13 +94,15 @@ def get_version():
 )
 def get_config():
     reason = aws_model_sync_reason()
+    defaults = resolve_artifact_defaults()
+    storage = get_inference_history_service()
+    if not storage.ready:
+        storage.initialize()
     return {
-        "defaults": {
-            "artifacts_bucket": read_deploy_text("models_bucket.txt"),
-            "artifacts_prefix": read_deploy_text("models_prefix.txt"),
-        },
+        "defaults": defaults,
         "aws_model_sync": {
             "enabled": reason is None,
             "reason": reason,
         },
+        "storage": storage.status(),
     }
