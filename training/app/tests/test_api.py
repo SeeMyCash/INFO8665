@@ -20,6 +20,8 @@ class TestHealthEndpoints:
         data = resp.json()
         assert data["ok"] is True
         assert "pipeline" in data
+        assert "storage" in data
+        assert "backend" in data["storage"]
 
     def test_version(self):
         resp = client.get("/api/version")
@@ -31,7 +33,9 @@ class TestHealthEndpoints:
     def test_config(self):
         resp = client.get("/api/config")
         assert resp.status_code == 200
-        assert "defaults" in resp.json()
+        data = resp.json()
+        assert "defaults" in data
+        assert "storage" in data
 
 
 class TestModelEndpoints:
@@ -104,6 +108,24 @@ class TestPipelineEndpoints:
         )
         assert resp.status_code == 415
         assert "detail" in resp.json()
+
+
+class TestStorageEndpoints:
+    """Verify storage routes respond correctly."""
+
+    def test_storage_status(self):
+        resp = client.get("/api/storage/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "backend" in data
+        assert "ready" in data
+
+    def test_storage_history(self):
+        resp = client.get("/api/storage/history")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "entries" in data
+        assert isinstance(data["entries"], list)
 
 
 class TestLegacyInference:
