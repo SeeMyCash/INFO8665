@@ -24,6 +24,11 @@ try:
 except Exception:
     boto3 = None
 
+from _runtime import env_default, load_repo_env
+
+
+load_repo_env()
+
 
 def _repo_root() -> Path:
     # INFO8665 repo root = parent of scripts/
@@ -83,7 +88,7 @@ def maybe_flatten(extracted_dir: Path, job_name: str, flat_dir: Path) -> list[Pa
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download SageMaker TrainingJob model artifacts")
-    parser.add_argument("--region", default="us-east-1")
+    parser.add_argument("--region", default=env_default("S3_REGION", "us-east-1"))
     parser.add_argument(
         "--job",
         action="append",

@@ -13,6 +13,11 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 
+from _runtime import load_repo_env
+from _tracking import build_tracker
+
+load_repo_env()
+
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
@@ -89,6 +94,9 @@ def main() -> int:
     parser.add_argument("--num-workers", type=int, default=-1, help="-1 = auto")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--report-out", default=str(Path("outputs") / "reports" / "spoof_guard_eval.json"))
+    parser.add_argument("--mlflow-experiment", default="", help="Override MLflow experiment name")
+    parser.add_argument("--mlflow-run-name", default="", help="Override MLflow run name")
+    parser.add_argument("--disable-mlflow", action="store_true", help="Disable MLflow logging for this run")
     args = parser.parse_args()
 
     device = resolve_device(args.device)
@@ -178,15 +186,45 @@ def main() -> int:
             "fn": fn,
         },
     }
+    out_path = Path(args.report_out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    tracker = build_tracker(
+        component="spoof_guard_eval",
+        experiment_name=args.mlflow_experiment,
+        run_name=args.mlflow_run_name or f"eval::{Path(args.model).stem}",
+        enabled=not args.disable_mlflow,
+        extra_tags={"framework": "pytorch", "task": "eval"},
+    )
+
+    with tracker:
+        tracker.log_params(
+            {
+                **vars(args),
+                "resolved_device": str(device),
+                "resolved_workers": workers,
+                "classes": model_classes,
+                "spoof_index": spoof_idx,
+            }
+        )
+        tracker.log_metrics(
+            {
+                "overall_accuracy": overall_acc,
+                "spoof_precision": spoof_precision,
+                "spoof_recall": spoof_recall,
+                "spoof_false_positive_rate": spoof_fpr,
+            }
+        )
+        tracker.log_artifact(args.model, artifact_path="inputs")
+        tracker.log_dict(report, "reports/spoof_guard_eval.json")
+        tracker.log_artifact(out_path, artifact_path="reports")
 
     print(f"overall_acc={overall_acc:.4f}")
     print(f"spoof_precision={spoof_precision:.4f}")
     print(f"spoof_recall={spoof_recall:.4f}")
     print(f"spoof_fpr={spoof_fpr:.4f}")
 
-    out_path = Path(args.report_out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"report_saved={out_path}")
     return 0
 

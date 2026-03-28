@@ -13,6 +13,11 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, models, transforms
 
+from _runtime import load_repo_env
+from _tracking import build_tracker
+
+load_repo_env()
+
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
@@ -74,6 +79,9 @@ def main() -> int:
     parser.add_argument("--num-workers", type=int, default=-1, help="-1 = auto")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--report-out", default=str(Path("outputs") / "reports" / "bill_classifier_eval.json"))
+    parser.add_argument("--mlflow-experiment", default="", help="Override MLflow experiment name")
+    parser.add_argument("--mlflow-run-name", default="", help="Override MLflow run name")
+    parser.add_argument("--disable-mlflow", action="store_true", help="Disable MLflow logging for this run")
     args = parser.parse_args()
 
     device = resolve_device(args.device)
@@ -130,11 +138,33 @@ def main() -> int:
         "dataset_to_model_index": {name: int(label_remap[idx]) for idx, name in enumerate(dataset_classes)},
         "confusion_matrix": conf.tolist(),
     }
-    print(f"overall_acc={overall:.4f}")
-
     out_path = Path(args.report_out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+    tracker = build_tracker(
+        component="bill_classifier_eval",
+        experiment_name=args.mlflow_experiment,
+        run_name=args.mlflow_run_name or f"eval::{Path(args.model).stem}",
+        enabled=not args.disable_mlflow,
+        extra_tags={"framework": "pytorch", "task": "eval"},
+    )
+
+    with tracker:
+        tracker.log_params(
+            {
+                **vars(args),
+                "resolved_device": str(device),
+                "resolved_workers": workers,
+                "classes": model_classes,
+            }
+        )
+        tracker.log_metrics({"overall_accuracy": overall})
+        tracker.log_artifact(args.model, artifact_path="inputs")
+        tracker.log_dict(report, "reports/bill_classifier_eval.json")
+        tracker.log_artifact(out_path, artifact_path="reports")
+    print(f"overall_acc={overall:.4f}")
+
     print(f"report_saved={out_path}")
     return 0
 
