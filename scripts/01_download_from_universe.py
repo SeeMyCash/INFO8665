@@ -19,6 +19,11 @@ from urllib.parse import urlparse
 
 import yaml
 
+from _runtime import load_repo_env
+
+
+load_repo_env()
+
 
 def require_env_api_key() -> str:
     api_key = os.environ.get("ROBOFLOW_API_KEY", "").strip()
