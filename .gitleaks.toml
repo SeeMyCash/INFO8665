@@ -1,0 +1,234 @@
+# .gitleaks.toml – Custom rules for See My Cash / INFO8665 project
+# Detects hardcoded secrets, credentials, hyperparameters, and config values
+# that should be managed via environment variables.
+
+title = "See My Cash – GitLeaks Configuration"
+
+[extend]
+# Inherit all built-in rules (API keys, tokens, etc.)
+useDefault = true
+
+# ─── Database Credentials ───────────────────────────────────────
+
+[[rules]]
+id = "hardcoded-db-username"
+description = "Hardcoded database username"
+regex = '''(?i)(db[_-]?user(name)?|database[_-]?user)\s*[=:]\s*["']?[a-zA-Z0-9_]+["']?'''
+tags = ["database", "username"]
+keywords = ["db_user", "db_username", "database_user"]
+[rules.allowlist]
+paths = ['''docker-compose\.yml$''', '''config\.py$''', '''\.env''']
+
+[[rules]]
+id = "hardcoded-db-password"
+description = "Hardcoded database password"
+regex = '''(?i)(db[_-]?pass(word)?|database[_-]?pass(word)?)\s*[=:]\s*["']?[^\s"']+["']?'''
+tags = ["database", "password"]
+keywords = ["db_pass", "db_password", "database_password"]
+[rules.allowlist]
+paths = ['''docker-compose\.yml$''', '''config\.py$''', '''\.env''']
+
+[[rules]]
+id = "hardcoded-db-hostname"
+description = "Hardcoded database hostname"
+regex = '''(?i)(db[_-]?host(name)?|database[_-]?host)\s*[=:]\s*["']?[a-zA-Z0-9._-]+["']?'''
+tags = ["database", "hostname"]
+keywords = ["db_host", "db_hostname", "database_host"]
+[rules.allowlist]
+paths = ['''docker-compose\.yml$''', '''config\.py$''', '''\.env''']
+
+[[rules]]
+id = "hardcoded-db-port"
+description = "Hardcoded database port"
+regex = '''(?i)(db[_-]?port|database[_-]?port)\s*[=:]\s*["']?\d{4,5}["']?'''
+tags = ["database", "port"]
+keywords = ["db_port", "database_port"]
+[rules.allowlist]
+paths = ['''docker-compose\.yml$''', '''config\.py$''', '''\.env''']
+
+# ─── Grafana / Monitoring Credentials ───────────────────────────
+
+[[rules]]
+id = "grafana-admin-password"
+description = "Hardcoded Grafana admin password"
+regex = '''(?i)GF_SECURITY_ADMIN_PASSWORD\s*[=:]\s*["']?[^\s"'${}]+["']?'''
+tags = ["grafana", "password"]
+keywords = ["GF_SECURITY_ADMIN_PASSWORD"]
+
+[[rules]]
+id = "grafana-cloud-api-key"
+description = "Grafana Cloud API key"
+regex = '''glc_[A-Za-z0-9+/=]{20,}'''
+tags = ["grafana", "api-key"]
+keywords = ["glc_"]
+
+# ─── EDA Feature Names ─────────────────────────────────────────
+
+[[rules]]
+id = "hardcoded-eda-feature-names"
+description = "Hardcoded EDA feature/class names in source code"
+regex = '''(?i)(feature[_-]?names?|class[_-]?names?)\s*[=:]\s*["']\s*(banknote|coin|confuser)'''
+tags = ["eda", "feature-names"]
+keywords = ["feature_names", "class_names", "banknote", "confuser"]
+
+# ─── Training Hyperparameters ───────────────────────────────────
+
+[[rules]]
+id = "hardcoded-learning-rate"
+description = "Hardcoded learning rate in training code"
+regex = '''(?i)(learning[_-]?rate|lr0?)\s*[=:]\s*["']?[0-9]+\.?[0-9]*[eE]?[-+]?[0-9]*["']?'''
+tags = ["training", "hyperparameter"]
+keywords = ["learning_rate", "lr"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.md$''', '''\.txt$''', '''requirements''', '''\.py$''', '''\.yaml$''']
+
+[[rules]]
+id = "hardcoded-batch-size"
+description = "Hardcoded batch size"
+regex = '''(?i)batch[_-]?size\s*[=:]\s*["']?\d+["']?'''
+tags = ["training", "hyperparameter"]
+keywords = ["batch_size"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.md$''', '''\.txt$''', '''\.py$''', '''\.yaml$''']
+
+[[rules]]
+id = "hardcoded-momentum"
+description = "Hardcoded momentum value"
+regex = '''(?i)momentum\s*[=:]\s*["']?0\.\d+["']?'''
+tags = ["training", "hyperparameter"]
+keywords = ["momentum"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.md$''', '''\.txt$''', '''\.py$''', '''\.yaml$''']
+
+[[rules]]
+id = "hardcoded-weight-decay"
+description = "Hardcoded weight decay"
+regex = '''(?i)weight[_-]?decay\s*[=:]\s*["']?[0-9]+\.?[0-9]*[eE]?[-+]?[0-9]*["']?'''
+tags = ["training", "hyperparameter"]
+keywords = ["weight_decay"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.md$''', '''\.txt$''', '''\.py$''', '''\.yaml$''']
+
+# ─── Expected Accuracy Levels ───────────────────────────────────
+
+[[rules]]
+id = "hardcoded-expected-accuracy"
+description = "Hardcoded expected accuracy threshold"
+regex = '''(?i)(expected[_-]?(min[_-]?)?accuracy|accuracy[_-]?threshold|target[_-]?accuracy)\s*[=:]\s*["']?0\.\d+["']?'''
+tags = ["training", "accuracy"]
+keywords = ["expected_accuracy", "accuracy_threshold", "target_accuracy"]
+
+# ─── Epochs ─────────────────────────────────────────────────────
+
+[[rules]]
+id = "hardcoded-epochs"
+description = "Hardcoded number of training epochs"
+regex = '''(?i)(num[_-]?)?epochs\s*[=:]\s*["']?\d+["']?'''
+tags = ["training", "epochs"]
+keywords = ["epochs"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.md$''', '''\.txt$''', '''\.py$''', '''\.yaml$''']
+
+# ─── Experiment Name / Version ──────────────────────────────────
+
+[[rules]]
+id = "hardcoded-experiment-name"
+description = "Hardcoded experiment or run name"
+regex = '''(?i)(experiment[_-]?name|run[_-]?name)\s*[=:]\s*["'][^"'${}]+["']'''
+tags = ["experiment", "name"]
+keywords = ["experiment_name", "run_name"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.md$''', '''\.txt$''', '''\.env''', '''\.py$''', '''\.yaml$''']
+
+[[rules]]
+id = "hardcoded-experiment-version"
+description = "Hardcoded experiment version number"
+regex = '''(?i)(experiment[_-]?version|app[_-]?version)\s*[=:]\s*["'][0-9]+\.[0-9]+\.[0-9]+["']'''
+tags = ["experiment", "version"]
+keywords = ["experiment_version", "app_version"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.md$''', '''\.txt$''', '''\.env''', '''\.py$''']
+
+# ─── S3 / AWS Credentials ──────────────────────────────────────
+
+[[rules]]
+id = "hardcoded-s3-region"
+description = "Hardcoded S3 region"
+regex = '''(?i)S3[_-]?REGION\s*[=:]\s*["']?[a-z]{2}-[a-z]+-\d["']?'''
+tags = ["aws", "region"]
+keywords = ["s3_region"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.env''', '''\.py$''', '''\.yaml$''']
+
+# ─── Detector Thresholds ───────────────────────────────────────
+
+[[rules]]
+id = "hardcoded-detector-thresholds"
+description = "Hardcoded detector confidence/IOU thresholds"
+regex = '''(?i)DETECTOR_(CONF|IOU)_THRESHOLD\s*[=:]\s*["']?[0-9]+\.?[0-9]*["']?'''
+tags = ["detector", "threshold"]
+keywords = ["DETECTOR_CONF_THRESHOLD", "DETECTOR_IOU_THRESHOLD"]
+[rules.allowlist]
+paths = ['''\.toml$''', '''\.md$''', '''\.env''', '''\.py$''']
+
+# ─── GitHub Personal Access Token ───────────────────────────────
+
+[[rules]]
+id = "github-pat"
+description = "GitHub Personal Access Token"
+regex = '''ghp_[A-Za-z0-9]{36,}'''
+tags = ["github", "token"]
+keywords = ["ghp_"]
+
+# ─── Roboflow API Key ──────────────────────────────────────────
+
+[[rules]]
+id = "roboflow-api-key"
+description = "Hardcoded Roboflow API key"
+regex = '''(?i)ROBOFLOW_API_KEY\s*[=:]\s*["']?[A-Za-z0-9_-]{16,}["']?'''
+tags = ["roboflow", "api-key"]
+keywords = ["ROBOFLOW_API_KEY"]
+
+# ─── MLflow Auth ────────────────────────────────────────────────
+
+[[rules]]
+id = "mlflow-basic-auth"
+description = "Hardcoded MLflow auth secret"
+regex = '''(?i)(MLFLOW_TRACKING_(USERNAME|PASSWORD)|MLFLOW_FLASK_SERVER_SECRET_KEY)\s*[=:]\s*["']?[^$\s"'`][^\s"'`]*["']?'''
+tags = ["mlflow", "auth"]
+keywords = [
+    "MLFLOW_TRACKING_USERNAME",
+    "MLFLOW_TRACKING_PASSWORD",
+    "MLFLOW_FLASK_SERVER_SECRET_KEY",
+]
+
+# ─── Allowlist (files that may legitimately contain these patterns) ──
+
+[allowlist]
+paths = [
+    '''\.gitleaks\.toml$''',
+    '''\.env\.example$''',
+    '''(?:^|/)\.env$''',
+    '''(?:^|/)gitleaks-report(?:-git)?\.json$''',
+    '''(?:^|/)data(?:/.*)?$''',
+    '''(?:^|/)outputs/datasets(?:/.*)?$''',
+    '''(?:^|/)outputs/tmp(?:/.*)?$''',
+    '''(?:^|/)outputs/mlflow(?:/.*)?$''',
+    '''(?:^|/)mlruns(?:/.*)?$''',
+    '''(?:^|/)mlartifacts(?:/.*)?$''',
+    '''(?:^|/)node_modules(?:/.*)?$''',
+    '''(?:^|/)__pycache__(?:/.*)?$''',
+    '''(?i)\.(?:pyc|pyo)$''',
+    '''(?:^|/)[^/]+\.egg-info(?:/.*)?$''',
+    '''(?i)(?:^|/)\.venv(?:/.*)?$''',
+    '''(?:^|/)dist(?:/.*)?$''',
+    '''(?:^|/)\.vscode(?:/.*)?$''',
+    '''(?:^|/)\.idea(?:/.*)?$''',
+    '''(?:^|/).*\.sw[op]$''',
+    '''(?:^|/)commit_changes\.sh$''',
+    '''(?:^|/)recent_change_ownership_from_ado\.md$''',
+    '''(?:^|/)outputs(?:/.*)?$''',
+    '''(?:^|/)tests(?:/.*)?$''',
+    '''(?:^|/)training/app/tests(?:/.*)?$''',
+    '''docker-compose\.yml$''',
+]

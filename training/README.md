@@ -2,6 +2,14 @@
 
 This repo supports training locally for iteration speed, with an optional cloud path when you want scale + reproducible, auditable runs.
 
+## Experiment tracking
+
+All primary train/eval scripts now support MLflow out of the box.
+
+- Start the local tracking server with `docker compose up -d mlflow`
+- Point local scripts at it with `MLFLOW_TRACKING_URI=http://localhost:5000` in `.env`
+- Override per run with `--mlflow-experiment`, `--mlflow-run-name`, or skip logging with `--disable-mlflow`
+
 ## Local training
 
 ### Detector (YOLO)
@@ -85,7 +93,9 @@ Detector quantization command (fallback path):
 Screen detector fine-tune path now included:
 
 - Build dataset: `python scripts/30_prepare_screen_dataset_from_coco128.py`
-- Submit training: `python scripts/31_submit_sagemaker_screen_yolo.py --bucket <S3_BUCKET_WITH_ROLE_ACCESS> --instance-type ml.m5.xlarge`
+- Submit training: `python scripts/31_submit_sagemaker_screen_yolo.py --instance-type ml.m5.xlarge`
+
+The submission script now reads `SAGEMAKER_ROLE_ARN`, `SAGEMAKER_BUCKET`, and the screen dataset/output prefixes from `.env` by default.
 
 Latest evaluated screen-guard detector:
 
@@ -117,6 +127,10 @@ This writes:
 - `outputs/models/<TRAINING_JOB_NAME>__best.pt` (if present)
 - `outputs/models/<TRAINING_JOB_NAME>__model.pt` (if present)
 
+To import historical SageMaker training jobs into MLflow:
+
+- `python scripts/41_import_sagemaker_runs_to_mlflow.py`
+
 ## Promotion / “minimum proof” comparisons
 
 To compare an old vs new champion on frozen packs (objective metrics + confusers + latency/size proxies):
@@ -135,3 +149,21 @@ Promotion comparisons are project-specific and are not duplicated into this stan
 - Pre-detector spoof checks are disabled by default (`SPOOF_GUARD_ENABLED=0`).
 - RN app users can manually enable it in Settings -> Security -> Screen Spoof Protection.
 - You can tune behavior with `SPOOF_GUARD_THRESHOLD`, `SPOOF_GUARD_HEURISTIC_ONLY_THRESHOLD`, and `SPOOF_GUARD_BLOCK_ON_DETECT`.
+
+## Inference storage backends
+
+The FastAPI app now keeps optional server-side inference history and can run in either of these modes:
+
+- `APP_STORAGE_BACKEND=local`: append history to `APP_LOCAL_STORAGE_PATH`
+- `APP_STORAGE_BACKEND=database`: persist history to the configured relational database
+
+For the database mode, the main settings are:
+
+- `DB_HOSTNAME`
+- `DB_PORT`
+- `DB_NAME`
+- `DB_USERNAME`
+- `DB_PASSWORD`
+- `DB_SSLMODE`
+
+Secrets can come from direct env vars, `*_FILE` overrides such as `DB_PASSWORD_FILE`, or mounted secret directories like `/run/secrets/db_password`. The API exposes sanitized diagnostics at `/api/storage/status` and recent records at `/api/storage/history`.

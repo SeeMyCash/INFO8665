@@ -1,5 +1,5 @@
 """
-Pydantic response schemas – used for serialising & documenting API responses.
+Pydantic response schemas used for API serialization and OpenAPI docs.
 """
 
 from typing import Any, Dict, List, Optional
@@ -7,14 +7,34 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-# ── Shared error model ───────────────────────────────────────
-
 class ErrorResponse(BaseModel):
     """Standard error envelope returned for all non-2xx responses."""
+
     detail: str = Field(..., description="Human-readable error message.")
 
 
-# ── Health & Info ────────────────────────────────────────────
+class DatabaseStatusResponse(BaseModel):
+    driver: Optional[str] = None
+    hostname: Optional[str] = None
+    port: Optional[int] = None
+    name: Optional[str] = None
+    sslmode: Optional[str] = None
+    url_configured: bool = False
+    url_source: Optional[str] = None
+    username_configured: bool = False
+    username_source: Optional[str] = None
+    password_configured: bool = False
+    password_source: Optional[str] = None
+
+
+class StorageStatusResponse(BaseModel):
+    backend: str
+    ready: bool
+    local_path: str
+    max_entries: int
+    last_error: Optional[str] = None
+    database: Optional[DatabaseStatusResponse] = None
+
 
 class HealthResponse(BaseModel):
     ok: bool
@@ -23,6 +43,7 @@ class HealthResponse(BaseModel):
     available_models: List[str]
     pipeline: Dict[str, Optional[str]]
     pipeline_error: Optional[str] = None
+    storage: StorageStatusResponse
 
 
 class VersionResponse(BaseModel):
@@ -48,9 +69,8 @@ class AwsModelSync(BaseModel):
 class ConfigResponse(BaseModel):
     defaults: ConfigDefaults
     aws_model_sync: Optional[AwsModelSync] = None
+    storage: StorageStatusResponse
 
-
-# ── Pipeline ─────────────────────────────────────────────────
 
 class PipelineStatusResponse(BaseModel):
     pipeline: Dict[str, Optional[str]]
@@ -82,7 +102,34 @@ class PipelineInferResponse(BaseModel):
     server_timing_ms: float
 
 
-# ── Model management ─────────────────────────────────────────
+class HistorySummaryResponse(BaseModel):
+    blocked: bool = False
+    warning: Optional[str] = None
+    detections_count: int = 0
+    top_prediction_label: Optional[str] = None
+    top_prediction_confidence: Optional[float] = None
+
+
+class StorageHistoryEntryResponse(BaseModel):
+    request_id: str
+    created_at: str
+    inference_kind: str
+    source_filename: Optional[str] = None
+    content_type: Optional[str] = None
+    payload_size_bytes: int
+    server_timing_ms: float
+    requested_top_k_targets: int = 1
+    spoof_guard_enabled: Optional[bool] = None
+    summary: HistorySummaryResponse
+    pipeline_models: Dict[str, Optional[str]] = Field(default_factory=dict)
+    result: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StorageHistoryResponse(BaseModel):
+    backend: str
+    count: int
+    entries: List[StorageHistoryEntryResponse]
+
 
 class ModelsListResponse(BaseModel):
     active_model: Optional[str] = None
@@ -99,8 +146,6 @@ class ModelsRefreshResponse(BaseModel):
     downloaded: List[str]
     available: List[str]
 
-
-# ── Legacy inference ─────────────────────────────────────────
 
 class LegacyInferResponse(BaseModel):
     model: Optional[str] = None

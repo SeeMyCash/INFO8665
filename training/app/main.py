@@ -9,6 +9,7 @@ includes the versioned API router, and registers lifecycle events.
 import logging
 import time
 import traceback
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +20,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.api.v1.router import router as v1_router
 from app.core.config import settings
 from app.services.pipeline import ensure_pipeline_models
+from app.services.storage import initialize_inference_history_service
 import app.services.pipeline as _pl
 
 logger = logging.getLogger("smc")
@@ -48,6 +50,13 @@ OPENAPI_TAGS = [
         "description": "Server health checks, version info, and configuration.",
     },
     {
+        "name": "Storage & Secrets",
+        "description": (
+            "Server-side persistence options and secret-aware storage diagnostics. "
+            "Use these routes to confirm whether inference history is stored locally or in the configured database."
+        ),
+    },
+    {
         "name": "Pipeline",
         "description": (
             "Automatic multi-model pipeline: spoof guard -> detector -> bill reader / coin classifier. "
@@ -72,6 +81,23 @@ def create_app() -> FastAPI:
     configure_logging()
     logger.info("Application initialization started.")
 
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        logger.info("Startup event triggered; initializing pipeline models.")
+        _pl.server_start_time = time.time()
+        storage_status = initialize_inference_history_service()
+        logger.info(
+            "Storage backend '%s' ready=%s.",
+            storage_status.get("backend"),
+            storage_status.get("ready"),
+        )
+        try:
+            ensure_pipeline_models(allow_refresh_from_defaults=True)
+            logger.info("Pipeline models loaded on startup.")
+        except Exception as exc:
+            logger.warning(f"Could not auto-load pipeline on startup: {exc}")
+        yield
+
     application = FastAPI(
         title=settings.app_title,
         description=(
@@ -86,6 +112,7 @@ def create_app() -> FastAPI:
         openapi_tags=OPENAPI_TAGS,
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     # -- Middleware --
@@ -148,17 +175,6 @@ def create_app() -> FastAPI:
             status_code=500,
             content={"detail": "Internal server error. Check server logs for details."},
         )
-
-    # -- Lifecycle events --
-    @application.on_event("startup")
-    def _startup_event():
-        logger.info("Startup event triggered; initializing pipeline models.")
-        _pl.server_start_time = time.time()
-        try:
-            ensure_pipeline_models(allow_refresh_from_defaults=True)
-            logger.info("Pipeline models loaded on startup.")
-        except Exception as exc:
-            logger.warning(f"Could not auto-load pipeline on startup: {exc}")
 
     # -- UI routes --
     reserved_root_prefixes = (

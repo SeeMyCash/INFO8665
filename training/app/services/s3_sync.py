@@ -24,12 +24,19 @@ def aws_model_sync_reason() -> Optional[str]:
     return None
 
 
+def _safe_extract_tarball(tar_path: Path, out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(tar_path, "r:gz") as tar:
+        for member in tar.getmembers():
+            target = (out_dir / member.name).resolve()
+            if not str(target).startswith(str(out_dir.resolve())):
+                raise RuntimeError(f"Unsafe tar member path: {member.name}")
+        tar.extractall(out_dir)
+
+
 def _extract_model_tarball(tar_path: Path, target_name: str) -> Optional[Path]:
     out_dir = settings.models_dir / target_name
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    with tarfile.open(tar_path, "r:gz") as tar:
-        tar.extractall(out_dir)
+    _safe_extract_tarball(tar_path, out_dir)
 
     classifier = out_dir / "model.pt"
     yolo_candidates = [
@@ -118,6 +125,18 @@ def read_deploy_text(name: str) -> Optional[str]:
     return None
 
 
+def resolve_artifact_defaults() -> Dict[str, Optional[str]]:
+    """Resolve default S3 bucket/prefix from deploy files first, then env-backed settings."""
+    bucket = read_deploy_text("models_bucket.txt") or settings.artifacts_bucket
+    prefix = read_deploy_text("models_prefix.txt") or settings.artifacts_prefix
+    bucket = str(bucket).strip() if bucket is not None else None
+    prefix = str(prefix).strip() if prefix is not None else settings.artifacts_prefix
+    return {
+        "artifacts_bucket": bucket or None,
+        "artifacts_prefix": prefix or settings.artifacts_prefix,
+    }
+
+
 def refresh_from_deploy_defaults(
     max_models: int = 250,
     region: Optional[str] = None,
@@ -125,14 +144,14 @@ def refresh_from_deploy_defaults(
     """Attempt to sync models from S3 using deploy-time defaults."""
     if aws_model_sync_reason() is not None:
         return False
-    bucket = read_deploy_text("models_bucket.txt")
+    defaults = resolve_artifact_defaults()
+    bucket = defaults["artifacts_bucket"]
     if not bucket:
         return False
-    prefix = read_deploy_text("models_prefix.txt") or settings.artifacts_prefix
     try:
         result = sync_models_from_s3(
             bucket=bucket,
-            prefix=prefix,
+            prefix=defaults["artifacts_prefix"] or settings.artifacts_prefix,
             max_models=max_models,
             region=region or settings.s3_region,
         )
