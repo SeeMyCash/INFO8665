@@ -12,7 +12,7 @@ End-to-end currency recognition project covering data engineering, model trainin
 6. Serve a **FastAPI inference API** with a multi-model pipeline (spoof guard -> detector -> bill reader / coin classifier).
 7. Provide a **React Native (Expo) web UI** for live camera inference, history, and settings.
 
-No hard-coded secrets belong in this repo. For Roboflow downloads, set `ROBOFLOW_API_KEY` in your environment.
+No hard-coded secrets belong in this repo. Copy `.env.example` to `.env` and keep real credentials there or in your shell environment.
 
 ## Quick start (Docker Compose)
 
@@ -21,7 +21,10 @@ No hard-coded secrets belong in this repo. For Roboflow downloads, set `ROBOFLOW
 From the repo root (`INFO8665/`):
 
 ```bash
-# Build and start the inference API
+# Create a local env file
+cp .env.example .env
+
+# Build and start the inference API + MLflow
 docker compose up --build -d
 
 # Verify the server is healthy
@@ -38,6 +41,15 @@ curl http://localhost:8080/api/health
 | <http://localhost:8080/redoc>              | ReDoc API documentation                                                    |
 | <http://localhost:8080/api/health>         | Health check (JSON)                                                        |
 | <http://localhost:8080/api/pipeline/infer> | Pipeline inference endpoint (POST an image)                                |
+| <http://localhost:5000>                    | MLflow tracking UI                                                         |
+
+### Optional monitoring stack
+
+```bash
+docker compose --profile monitoring up -d
+```
+
+This starts Prometheus, Loki, Promtail, and Grafana using credentials sourced from `.env`.
 
 ### Running E2E tests
 
@@ -46,6 +58,12 @@ docker compose run --rm tests
 ```
 
 This spins up a test container that waits for the API to be healthy, then runs the full pytest suite (17 tests covering health, models, pipeline, inference, and error handling).
+
+### Secret scanning
+
+```bash
+gitleaks detect --source . --no-git --config .gitleaks.toml
+```
 
 ### Stopping the service
 
@@ -102,4 +120,21 @@ Roboflow download (requires `ROBOFLOW_API_KEY` passed at runtime; never commit i
 ```bash
 docker run --rm -e ROBOFLOW_API_KEY="<your_key>" info8665-local python scripts/01_download_from_universe.py
 ```
+
+## Storage and secrets
+
+The inference API now supports two persistence modes for server-side inference history:
+
+- `APP_STORAGE_BACKEND=local` writes JSONL history to `APP_LOCAL_STORAGE_PATH`
+- `APP_STORAGE_BACKEND=database` writes history to Postgres using `DB_HOSTNAME`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, and `DB_PASSWORD`
+
+Docker Compose now starts Postgres alongside the API and MLflow by default. The app still keeps a mounted local storage path at `outputs/app-data/` so you can switch back to local persistence without changing the container layout.
+
+Secret resolution is centralized in the app and supports:
+
+- Direct environment variables such as `DB_PASSWORD`
+- File-based overrides such as `DB_PASSWORD_FILE`
+- Mounted secret directories such as `/run/secrets/db_password`
+
+Use `GET /api/storage/status` to confirm which backend is active and whether database credentials were supplied from env or file sources without exposing the secret values themselves.
 
