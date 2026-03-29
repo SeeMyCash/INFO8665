@@ -19,6 +19,11 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision import datasets, models, transforms
 
+from _runtime import load_repo_env
+from _tracking import build_tracker
+
+load_repo_env()
+
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
@@ -168,6 +173,9 @@ def main() -> int:
     parser.add_argument("--amp", type=str2bool, default="true")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--mlflow-experiment", default="", help="Override MLflow experiment name")
+    parser.add_argument("--mlflow-run-name", default="", help="Override MLflow run name")
+    parser.add_argument("--disable-mlflow", action="store_true", help="Disable MLflow logging for this run")
     args = parser.parse_args()
 
     torch.manual_seed(int(args.seed))
@@ -226,65 +234,99 @@ def main() -> int:
         f"epochs:{args.epochs} batch:{args.batch_size} lr:{args.lr}"
     )
 
-    for epoch in range(1, int(args.epochs) + 1):
-        model.train()
-        run_loss = 0.0
-        total = 0
+    tracker = build_tracker(
+        component="bill_classifier_train",
+        experiment_name=args.mlflow_experiment,
+        run_name=args.mlflow_run_name or out_path.stem,
+        enabled=not args.disable_mlflow,
+        extra_tags={"framework": "pytorch", "task": "train"},
+    )
 
-        for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
-            optimizer.zero_grad(set_to_none=True)
-
-            with (torch.autocast(device_type="cuda", dtype=torch.float16) if amp_enabled else nullcontext()):
-                logits = model(images)
-                loss = criterion(logits, labels)
-
-            if amp_enabled:
-                scaler.scale(loss).backward()
-                if float(args.grad_clip) > 0:
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(args.grad_clip))
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                if float(args.grad_clip) > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(args.grad_clip))
-                optimizer.step()
-
-            run_loss += float(loss.item()) * labels.size(0)
-            total += labels.size(0)
-
-        if scheduler is not None:
-            scheduler.step()
-
-        train_loss = run_loss / max(total, 1)
-        val_loss, val_acc = evaluate(model, val_loader, criterion, device, amp_enabled=amp_enabled)
-        lr_now = optimizer.param_groups[0]["lr"]
-        print(
-            f"epoch={epoch} train_loss={train_loss:.4f} val_loss={val_loss:.4f} "
-            f"val_acc={val_acc:.4f} lr={lr_now:.6f}"
+    with tracker:
+        tracker.log_params(
+            {
+                **vars(args),
+                "resolved_device": str(device),
+                "resolved_workers": workers,
+                "resolved_pin_memory": pin_memory,
+                "resolved_persistent_workers": persistent_workers,
+                "resolved_amp": amp_enabled,
+                "classes": classes,
+            }
         )
 
-        improved = val_acc >= (best_acc + float(args.min_delta))
-        if improved:
-            best_acc = val_acc
-            bad_epochs = 0
-            torch.save(
+        for epoch in range(1, int(args.epochs) + 1):
+            model.train()
+            run_loss = 0.0
+            total = 0
+
+            for images, labels in train_loader:
+                images, labels = images.to(device), labels.to(device)
+                optimizer.zero_grad(set_to_none=True)
+
+                with (torch.autocast(device_type="cuda", dtype=torch.float16) if amp_enabled else nullcontext()):
+                    logits = model(images)
+                    loss = criterion(logits, labels)
+
+                if amp_enabled:
+                    scaler.scale(loss).backward()
+                    if float(args.grad_clip) > 0:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), float(args.grad_clip))
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    if float(args.grad_clip) > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), float(args.grad_clip))
+                    optimizer.step()
+
+                run_loss += float(loss.item()) * labels.size(0)
+                total += labels.size(0)
+
+            if scheduler is not None:
+                scheduler.step()
+
+            train_loss = run_loss / max(total, 1)
+            val_loss, val_acc = evaluate(model, val_loader, criterion, device, amp_enabled=amp_enabled)
+            lr_now = optimizer.param_groups[0]["lr"]
+            tracker.log_metrics(
                 {
-                    "model_state_dict": model.state_dict(),
-                    "classes": classes,
-                    "image_size": int(args.img_size),
-                    "backbone": args.backbone,
-                    "best_val_acc": float(best_acc),
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "val_accuracy": val_acc,
+                    "learning_rate": lr_now,
                 },
-                out_path,
+                step=epoch,
             )
-        else:
-            bad_epochs += 1
-            if bad_epochs >= int(args.patience):
-                print(f"early_stopping=1 patience={args.patience}")
-                break
+            print(
+                f"epoch={epoch} train_loss={train_loss:.4f} val_loss={val_loss:.4f} "
+                f"val_acc={val_acc:.4f} lr={lr_now:.6f}"
+            )
+
+            improved = val_acc >= (best_acc + float(args.min_delta))
+            if improved:
+                best_acc = val_acc
+                bad_epochs = 0
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "classes": classes,
+                        "image_size": int(args.img_size),
+                        "backbone": args.backbone,
+                        "best_val_acc": float(best_acc),
+                    },
+                    out_path,
+                )
+                tracker.log_artifact(out_path, artifact_path="checkpoints")
+            else:
+                bad_epochs += 1
+                if bad_epochs >= int(args.patience):
+                    print(f"early_stopping=1 patience={args.patience}")
+                    tracker.set_tag("early_stopped", True)
+                    break
+
+        tracker.log_metrics({"best_val_accuracy": best_acc})
 
     print(f"best_val_acc={best_acc:.4f}")
     print(f"saved={out_path}")

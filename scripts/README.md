@@ -20,6 +20,7 @@ Typical order:
 14. `31_submit_sagemaker_screen_yolo.py` (uploads dataset + submits SageMaker YOLO fine-tune)
 15. `32_expand_screen_dataset_coco2017.py` (expands screen dataset using COCO 2017 positives + sampled negatives)
 16. `40_download_sagemaker_champions.py` (optional AWS-only utility; requires `boto3`)
+17. `41_import_sagemaker_runs_to_mlflow.py` (imports historical SageMaker jobs into MLflow)
 
 Local optimization knobs (new defaults are local-friendly):
 
@@ -30,8 +31,11 @@ Local optimization knobs (new defaults are local-friendly):
 
 Secrets:
 
-- Roboflow API key must be provided via `ROBOFLOW_API_KEY` environment variable.
+- Copy `.env.example` to `.env` and keep secrets there or in your shell environment.
+- Roboflow API key is read from `ROBOFLOW_API_KEY`.
+- SageMaker submission defaults are read from `SAGEMAKER_ROLE_ARN`, `SAGEMAKER_BUCKET`, and related `SAGEMAKER_*` variables.
 
 Notes:
 
 - AWS/SageMaker scripts are optional. Local training does not require AWS credentials.
+- Train/eval scripts support `--mlflow-experiment`, `--mlflow-run-name`, and `--disable-mlflow`.

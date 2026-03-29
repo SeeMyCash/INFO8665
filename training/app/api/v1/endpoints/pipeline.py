@@ -25,6 +25,7 @@ from app.services.pipeline import (
     run_full_process,
 )
 from app.services.s3_sync import aws_model_sync_reason, refresh_from_deploy_defaults
+from app.services.storage import get_inference_history_service
 import app.services.pipeline as _pl
 
 logger = logging.getLogger("smc.pipeline")
@@ -249,6 +250,15 @@ async def infer(
     _pl.inference_count += 1
     _pl.inference_total_ms += elapsed_ms
     _pl.last_inference_ms = elapsed_ms
+    get_inference_history_service().record_pipeline_inference(
+        source_filename=file.filename,
+        content_type=file.content_type,
+        payload_size_bytes=len(payload),
+        server_timing_ms=round(elapsed_ms, 1),
+        requested_top_k_targets=requested_top_k,
+        spoof_guard_enabled=spoof_override,
+        result=result,
+    )
     logger.info("Pipeline infer completed in %.1fms.", elapsed_ms)
 
     return {
