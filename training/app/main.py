@@ -50,6 +50,14 @@ OPENAPI_TAGS = [
         "description": "Server health checks, version info, and configuration.",
     },
     {
+        "name": "ML Service Contracts",
+        "description": (
+            "Lifecycle-aligned service contracts for each ML use case in the project. "
+            "These endpoints make the ingestion, EDA, preprocessing, training, validation, serving, "
+            "integration, and monitoring stages explicit for submission."
+        ),
+    },
+    {
         "name": "Storage & Secrets",
         "description": (
             "Server-side persistence options and secret-aware storage diagnostics. "
