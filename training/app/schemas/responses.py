@@ -131,6 +131,37 @@ class StorageHistoryResponse(BaseModel):
     entries: List[StorageHistoryEntryResponse]
 
 
+class MlLifecycleContractResponse(BaseModel):
+    contract_id: str
+    service_name: str
+    lifecycle_stage: str
+    summary: str
+    api_contract_path: str
+    implementation_type: str
+    implementation_refs: List[str]
+    inputs: List[str]
+    outputs: List[str]
+
+
+class MlUseCaseSummaryResponse(BaseModel):
+    use_case: str
+    display_name: str
+    problem_type: str
+    description: str
+    stage_count: int
+    required_stages: List[str]
+    required_stages_present: List[str]
+    minimum_contract_requirement_met: bool
+
+
+class MlUseCaseDetailResponse(MlUseCaseSummaryResponse):
+    contracts: List[MlLifecycleContractResponse]
+
+
+class MlUseCaseListResponse(BaseModel):
+    use_cases: List[MlUseCaseSummaryResponse]
+
+
 class ModelsListResponse(BaseModel):
     active_model: Optional[str] = None
     active_kind: Optional[str] = None
