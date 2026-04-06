@@ -68,6 +68,17 @@ class TestModelEndpoints:
         assert "detail" in resp.json()
 
 
+class TestMlopsEndpoints:
+    """Verify ML lifecycle contract routes respond correctly."""
+
+    def test_mlops_use_cases(self):
+        resp = client.get("/api/mlops/use-cases")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "use_cases" in data
+        assert isinstance(data["use_cases"], list)
+
+
 class TestPipelineEndpoints:
     """Verify pipeline read-only routes respond correctly."""
 
