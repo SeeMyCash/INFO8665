@@ -40,6 +40,7 @@ curl http://localhost:8080/api/health
 | <http://localhost:8080/docs>               | Interactive Swagger / OpenAPI docs                                         |
 | <http://localhost:8080/redoc>              | ReDoc API documentation                                                    |
 | <http://localhost:8080/api/health>         | Health check (JSON)                                                        |
+| <http://localhost:8080/api/mlops/use-cases> | ML lifecycle service contract catalog                                      |
 | <http://localhost:8080/api/pipeline/infer> | Pipeline inference endpoint (POST an image)                                |
 | <http://localhost:5000>                    | MLflow tracking UI                                                         |
 
@@ -75,6 +76,7 @@ docker compose down
 
 - Data sources + download: `data-collection/README.md`
 - Local processing + EDA steps: `documentation/local_data_workflow.md`
+- ML lifecycle service contracts: `documentation/ml_service_contracts.md`
 - Training (local + optional cloud): `training/README.md`
 - Branching/promotion conventions: `documentation/workflow.md`
 
