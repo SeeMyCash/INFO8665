@@ -10,6 +10,29 @@ All primary train/eval scripts now support MLflow out of the box.
 - Point local scripts at it with `MLFLOW_TRACKING_URI=http://localhost:5000` in `.env`
 - Override per run with `--mlflow-experiment`, `--mlflow-run-name`, or skip logging with `--disable-mlflow`
 
+## Lifecycle service contracts
+
+The submission-facing ML lifecycle model is available in both docs and the API:
+
+- Docs: `documentation/ml_service_contracts.md`
+- API catalog: `GET /api/mlops/use-cases`
+- One use case: `GET /api/mlops/use-cases/{use_case_id}`
+- One stage contract: `GET /api/mlops/use-cases/{use_case_id}/contracts/{stage}`
+
+Each selected ML use case exposes at least the minimum six lifecycle stages:
+
+- ingestion
+- eda
+- preprocessing
+- training
+- validation
+- serving
+
+The stronger lifecycle view is also modeled with:
+
+- integration
+- monitoring
+
 ## Local training
 
 ### Detector (YOLO)
