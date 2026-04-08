@@ -46,6 +46,26 @@ def _parse_optional_bool(raw: Optional[str]) -> Optional[bool]:
     return None
 
 
+def _parse_optional_float(
+    raw: Optional[str],
+    *,
+    minimum: float = 0.0,
+    maximum: float = 1.0,
+) -> Optional[float]:
+    if raw is None:
+        return None
+    txt = str(raw).strip()
+    if txt == "":
+        return None
+    try:
+        value = float(txt)
+    except Exception:
+        return None
+    if value < minimum or value > maximum:
+        return None
+    return value
+
+
 @router.get(
     "/status",
     response_model=PipelineStatusResponse,
@@ -184,6 +204,14 @@ async def infer(
         None,
         description="Optional override for spoof guard (true/false). If omitted, server default is used.",
     ),
+    detector_conf_threshold: Optional[str] = Form(
+        None,
+        description="Optional detector confidence threshold override (0.0-1.0).",
+    ),
+    classifier_conf_threshold: Optional[str] = Form(
+        None,
+        description="Optional classifier top-1 confidence threshold override (0.0-1.0).",
+    ),
 ):
     logger.info("Pipeline infer request received (content_type=%s).", file.content_type)
     if file.content_type and file.content_type not in (
@@ -232,6 +260,20 @@ async def infer(
             status_code=400,
             detail="Invalid spoof_guard_enabled value. Use true/false.",
         )
+    detector_conf_override = _parse_optional_float(detector_conf_threshold)
+    if detector_conf_threshold is not None and detector_conf_override is None:
+        _pl.inference_errors += 1
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid detector_conf_threshold value. Use a number between 0 and 1.",
+        )
+    classifier_conf_override = _parse_optional_float(classifier_conf_threshold)
+    if classifier_conf_threshold is not None and classifier_conf_override is None:
+        _pl.inference_errors += 1
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid classifier_conf_threshold value. Use a number between 0 and 1.",
+        )
 
     t0 = time.time()
     try:
@@ -239,6 +281,8 @@ async def infer(
             image,
             top_k_targets=requested_top_k,
             spoof_guard_enabled=spoof_override,
+            detector_conf_threshold=detector_conf_override,
+            classifier_conf_threshold=classifier_conf_override,
         )
     except HTTPException:
         _pl.inference_errors += 1
