@@ -26,6 +26,14 @@ export type Detection = {
     xyxy?: number[];
 };
 
+function _hasCapturableFrame(video: HTMLVideoElement | null): video is HTMLVideoElement {
+    if (!video) return false;
+    return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+        && video.videoWidth > 0
+        && video.videoHeight > 0
+        && !video.ended;
+}
+
 export type WebLiveCameraRef = {
     /** Capture the current video frame as a JPEG Blob. */
     captureFrameBlob: () => Promise<Blob | null>;
@@ -70,6 +78,12 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
     const captureRef = useRef<HTMLCanvasElement | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const [ready, setReady] = useState(false);
+    const streamSessionRef = useRef(0);
+
+    // Detections are kept in a ref so the render loop always reads the latest
+    // value without needing to be restarted on every inference result.
+    const lastDetectionsRef = useRef<Detection[]>([]);
+    const renderLoopRef = useRef<number | null>(null);
 
     /* ── Build DOM elements once ─────────────── */
     useEffect(() => {
@@ -88,9 +102,9 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
             height: `${height}px`,
         });
 
-        // Video element — smooth live feed
+        // Video element — no autoplay attribute; play() is called explicitly
+        // after srcObject is set to avoid "play() interrupted by new load" errors.
         const video = document.createElement('video');
-        video.autoplay = true;
         video.playsInline = true;
         video.muted = true;
         Object.assign(video.style, {
@@ -104,8 +118,10 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
         container.appendChild(video);
         videoRef.current = video;
 
-        // Canvas overlay — bounding boxes drawn here
+        // Canvas overlay — bounding boxes drawn by the render loop
         const overlay = document.createElement('canvas');
+        overlay.setAttribute('aria-label', 'Currency detection overlay — bounding boxes are drawn here when currency is detected');
+        overlay.setAttribute('role', 'img');
         Object.assign(overlay.style, {
             position: 'absolute',
             top: '0',
@@ -133,15 +149,79 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
     useEffect(() => {
         if (Platform.OS !== 'web') return;
         if (active) {
-            _startStream();
+            void _startStream();
         } else {
             _stopStream();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [active, facing]);
 
+    const waitForCapturableFrame = useCallback(
+        (video: HTMLVideoElement, session: number, timeoutMs = 4000): Promise<boolean> =>
+            new Promise((resolve) => {
+                if (streamSessionRef.current !== session) {
+                    resolve(false);
+                    return;
+                }
+                if (_hasCapturableFrame(video)) {
+                    resolve(true);
+                    return;
+                }
+
+                let settled = false;
+                let rafId: number | null = null;
+                let timeoutId: number | null = null;
+
+                const cleanup = () => {
+                    video.removeEventListener('loadeddata', checkReady);
+                    video.removeEventListener('canplay', checkReady);
+                    video.removeEventListener('playing', checkReady);
+                    video.removeEventListener('resize', checkReady);
+                    if (rafId !== null) cancelAnimationFrame(rafId);
+                    if (timeoutId !== null) window.clearTimeout(timeoutId);
+                };
+
+                const finish = (ok: boolean) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    resolve(ok && streamSessionRef.current === session && _hasCapturableFrame(video));
+                };
+
+                const queueCheck = () => {
+                    if (settled || rafId !== null) return;
+                    rafId = requestAnimationFrame(() => {
+                        rafId = null;
+                        checkReady();
+                    });
+                };
+
+                const checkReady = () => {
+                    if (settled) return;
+                    if (streamSessionRef.current !== session) {
+                        finish(false);
+                        return;
+                    }
+                    if (_hasCapturableFrame(video)) {
+                        finish(true);
+                        return;
+                    }
+                    queueCheck();
+                };
+
+                video.addEventListener('loadeddata', checkReady);
+                video.addEventListener('canplay', checkReady);
+                video.addEventListener('playing', checkReady);
+                video.addEventListener('resize', checkReady);
+                timeoutId = window.setTimeout(() => finish(false), timeoutMs);
+                checkReady();
+            }),
+        [],
+    );
+
     async function _startStream() {
         _stopStream();
+        const session = streamSessionRef.current;
         const video = videoRef.current;
         if (!video) return;
 
@@ -155,100 +235,174 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
                 },
                 audio: false,
             });
+            if (streamSessionRef.current !== session) {
+                stream.getTracks().forEach((track) => track.stop());
+                return;
+            }
             streamRef.current = stream;
             video.srcObject = stream;
-            await video.play();
+
+            // Call play() explicitly and swallow AbortError — it means a
+            // competing load request fired (harmless: video is already playing).
+            try {
+                await video.play();
+            } catch (e: any) {
+                if (e.name !== 'AbortError') throw e;
+            }
+
+            const frameReady = await waitForCapturableFrame(video, session);
+            if (!frameReady) throw new Error('Camera stream did not become ready in time');
+
+            if (streamSessionRef.current !== session) return;
             setReady(true);
             onStreamReady?.();
         } catch (e: any) {
+            if (streamSessionRef.current !== session) return;
             onError?.(e?.message || 'Camera access failed');
             setReady(false);
         }
     }
 
     function _stopStream() {
+        streamSessionRef.current += 1;
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         if (videoRef.current) videoRef.current.srcObject = null;
         setReady(false);
-
-        const ctx = overlayRef.current?.getContext('2d');
-        if (ctx && overlayRef.current) {
-            ctx.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
-        }
     }
 
-    /* ── Bounding-box overlay ────────────────── */
+    /* ── Keep detections ref in sync ────────────
+     * Never touch the canvas here — that's the render loop's job.
+     * Update the canvas aria-label so screen readers reflect detection state. */
+    useEffect(() => {
+        lastDetectionsRef.current = detections;
+        const canvas = overlayRef.current;
+        if (!canvas) return;
+        if (detections.length === 0) {
+            canvas.setAttribute('aria-label', 'Currency detection overlay — no detections');
+        } else {
+            const names = detections
+                .map((d) => d.display_name || d.class_name || 'unknown')
+                .join(', ');
+            canvas.setAttribute('aria-label', `Detected: ${names}`);
+        }
+    }, [detections]);
+
+    /* ── Continuous render loop ──────────────────
+     * Runs at the display refresh rate (requestAnimationFrame) so the
+     * overlay is always in sync with the video frame. Detections come from
+     * the ref so they update without restarting the loop.
+     * Canvas dimensions are only reset when they actually change — avoids
+     * the per-frame clear that caused the visible shutter at 1 fps.        */
     useEffect(() => {
         if (Platform.OS !== 'web') return;
 
-        const canvas = overlayRef.current;
-        const video = videoRef.current;
-        if (!canvas || !video) return;
-
-        // Match canvas pixel resolution to its CSS display size
-        const rect = canvas.getBoundingClientRect();
-        const cw = rect.width || 1;
-        const ch = rect.height || 1;
-        canvas.width = cw;
-        canvas.height = ch;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.clearRect(0, 0, cw, ch);
-
-        if (!detections.length || !ready) return;
-
-        // Video intrinsic size
-        const vw = video.videoWidth || 1;
-        const vh = video.videoHeight || 1;
-
-        // object-fit: cover → scale to fill + center
-        const scale = Math.max(cw / vw, ch / vh);
-        const ox = (cw - vw * scale) / 2;
-        const oy = (ch - vh * scale) / 2;
-
-        for (const det of detections) {
-            if (!det.xyxy || det.xyxy.length < 4) continue;
-            const [x1, y1, x2, y2] = det.xyxy;
-
-            const dx1 = ox + x1 * scale;
-            const dy1 = oy + y1 * scale;
-            const bw = (x2 - x1) * scale;
-            const bh = (y2 - y1) * scale;
-
-            const tag = String(det.display_name || det.class_name || '?');
-            const color = CLASS_COLORS[tag] || CLASS_COLORS[det.class_name || ''] || '#A78BFA';
-            const conf = det.confidence != null ? Math.round(det.confidence * 100) : 0;
-            const label = `${tag} ${conf}%`;
-
-            // Box
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = color;
-            ctx.strokeRect(dx1, dy1, bw, bh);
-
-            // Translucent fill
-            ctx.fillStyle = color + '22';
-            ctx.fillRect(dx1, dy1, bw, bh);
-
-            // Label background
-            ctx.font = 'bold 14px sans-serif';
-            const tw = ctx.measureText(label).width;
-            const lh = 22;
-            ctx.fillStyle = color;
-            ctx.fillRect(dx1, dy1 - lh, tw + 10, lh);
-
-            // Label text
-            ctx.fillStyle = '#FFF';
-            ctx.fillText(label, dx1 + 5, dy1 - 6);
+        if (!ready) {
+            // Stop loop and clear overlay when stream goes away
+            if (renderLoopRef.current !== null) {
+                cancelAnimationFrame(renderLoopRef.current);
+                renderLoopRef.current = null;
+            }
+            const canvas = overlayRef.current;
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                ctx?.clearRect(0, 0, canvas.width, canvas.height);
+            }
+            return;
         }
-    }, [detections, ready]);
+
+        const loop = () => {
+            const canvas = overlayRef.current;
+            const video = videoRef.current;
+            if (!canvas || !video) return;
+
+            // Resize only when necessary — setting .width/.height always clears the canvas
+            const rect = canvas.getBoundingClientRect();
+            const cw = Math.max(1, Math.round(rect.width));
+            const ch = Math.max(1, Math.round(rect.height));
+            if (canvas.width !== cw || canvas.height !== ch) {
+                canvas.width = cw;
+                canvas.height = ch;
+            }
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { renderLoopRef.current = requestAnimationFrame(loop); return; }
+
+            ctx.clearRect(0, 0, cw, ch);
+
+            const dets = lastDetectionsRef.current;
+            if (dets.length && video.videoWidth && video.videoHeight) {
+                const vw = video.videoWidth;
+                const vh = video.videoHeight;
+
+                // object-fit: cover → scale to fill + center
+                const scale = Math.max(cw / vw, ch / vh);
+                const ox = (cw - vw * scale) / 2;
+                const oy = (ch - vh * scale) / 2;
+
+                for (const det of dets) {
+                    if (!det.xyxy || det.xyxy.length < 4) continue;
+                    const [x1, y1, x2, y2] = det.xyxy;
+
+                    const dx1 = ox + x1 * scale;
+                    const dy1 = oy + y1 * scale;
+                    const bw = (x2 - x1) * scale;
+                    const bh = (y2 - y1) * scale;
+
+                    const tag = String(det.display_name || det.class_name || '?');
+                    const color = CLASS_COLORS[tag] || CLASS_COLORS[det.class_name || ''] || '#A78BFA';
+                    const conf = det.confidence != null ? Math.round(det.confidence * 100) : 0;
+                    const label = `${tag} ${conf}%`;
+
+                    // Box
+                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = color;
+                    ctx.strokeRect(dx1, dy1, bw, bh);
+
+                    // Translucent fill
+                    ctx.fillStyle = color + '22';
+                    ctx.fillRect(dx1, dy1, bw, bh);
+
+                    // Label background
+                    ctx.font = 'bold 14px sans-serif';
+                    const tw = ctx.measureText(label).width;
+                    const lh = 22;
+                    ctx.fillStyle = color;
+                    ctx.fillRect(dx1, dy1 - lh, tw + 10, lh);
+
+                    // Label text
+                    ctx.fillStyle = '#FFF';
+                    ctx.fillText(label, dx1 + 5, dy1 - 6);
+                }
+            }
+
+            renderLoopRef.current = requestAnimationFrame(loop);
+        };
+
+        renderLoopRef.current = requestAnimationFrame(loop);
+
+        return () => {
+            if (renderLoopRef.current !== null) {
+                cancelAnimationFrame(renderLoopRef.current);
+                renderLoopRef.current = null;
+            }
+        };
+    }, [ready]);
 
     /* ── Frame capture ───────────────────────── */
     const captureFrameBlob = useCallback(async (): Promise<Blob | null> => {
         const video = videoRef.current;
         const canvas = captureRef.current;
-        if (!video || !canvas || !ready) return null;
+        const session = streamSessionRef.current;
+        if (!video || !canvas || !streamRef.current) return null;
+
+        if (!_hasCapturableFrame(video)) {
+            const frameReady = await waitForCapturableFrame(video, session);
+            if (!frameReady) return null;
+        }
+        if (streamSessionRef.current !== session) return null;
+
+        if (!ready) setReady(true);
 
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -260,7 +414,7 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
         return new Promise((resolve) => {
             canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
         });
-    }, [ready]);
+    }, [ready, waitForCapturableFrame]);
 
     useImperativeHandle(ref, () => ({ captureFrameBlob }), [captureFrameBlob]);
 
