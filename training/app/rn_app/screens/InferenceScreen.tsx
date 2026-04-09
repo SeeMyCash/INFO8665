@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
     AccessibilityInfo,
     ActivityIndicator,
+    AppState,
     Image,
     Platform,
     ScrollView,
@@ -12,15 +13,20 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { SaveFormat, manipulateAsync } from 'expo-image-manipulator';
 import { Ionicons } from '@expo/vector-icons';
 import GradientButton from '../components/GradientButton';
 import DetectionCard from '../components/DetectionCard';
+import DetectionOverlay from '../components/DetectionOverlay';
 import DebugPanel from '../components/DebugPanel';
 import WebLiveCamera, { WebLiveCameraRef } from '../components/WebLiveCamera';
 import ImageWithOverlay from '../components/ImageWithOverlay';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../contexts/HistoryContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { appendCameraDiagnosticsEntry, getCameraDiagnosticsLogUri } from '../services/cameraDiagnostics';
+import { runOfflineInference } from '../services/offlinePipeline';
+import { buildApiUrl, HOSTED_API_BASE_URL, resolveReachableApiBase } from '../services/serverApi';
 import { spacing, radii, shadows } from '../theme';
 
 type PipelineResponse = {
@@ -72,6 +78,13 @@ const LIVE_STABILITY_HOLD_MS = 1200;
 const LIVE_TOP_K_TARGETS = 5;
 const STILL_TOP_K_TARGETS = 5;
 const DISPLAY_MAX_DETECTIONS = 5;
+const CAMERA_READY_TIMEOUT_MS = 2500;
+const CAMERA_READY_MAX_RETRIES = 3;
+const CAMERA_EVENT_DEDUP_WINDOW_MS = 800;
+const CAMERA_NOISY_EVENTS = new Set([
+    'camera_view_layout',
+    'camera_preview_layout',
+]);
 
 type StableTarget = {
     className: string;
@@ -92,6 +105,18 @@ type LiveStabilityRefState = {
     candidateFrames: number;
     lastStableAt: number;
     lastStableResult: PipelineResponse | null;
+};
+
+type ServerUploadAsset = {
+    uri: string;
+    name: string;
+    type: string;
+};
+
+type CameraDebugEvent = {
+    ts: string;
+    event: string;
+    details?: string;
 };
 
 const LIVE_STABILITY_IDLE: LiveStabilityStatus = {
@@ -262,11 +287,48 @@ function _computeGuaranteedClassifierSummary(res: PipelineResponse | null): {
     };
 }
 
+function _toDebugString(value: unknown): string {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (value instanceof Error) {
+        return `${value.name}: ${value.message}${value.stack ? `\n${value.stack}` : ''}`;
+    }
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return String(value);
+    }
+}
+
+function _buildCameraErrorMessage(fallback: string, error: unknown): string {
+    const record = (error && typeof error === 'object') ? (error as Record<string, unknown>) : null;
+    const message = record && typeof record.message === 'string' ? record.message : '';
+    const code = record && (typeof record.code === 'string' || typeof record.code === 'number')
+        ? String(record.code)
+        : '';
+    const name = record && typeof record.name === 'string' ? record.name : '';
+    const reason = record && typeof record.reason === 'string' ? record.reason : '';
+
+    const summary = [message, code, name, reason]
+        .map((value) => String(value || '').trim())
+        .filter((value, index, array) => Boolean(value) && array.indexOf(value) === index)
+        .join(' | ');
+
+    return summary ? `${fallback}: ${summary}` : fallback;
+}
+
+function _truncateLine(value: string, max = 220): string {
+    if (value.length <= max) return value;
+    return `${value.slice(0, max - 3)}...`;
+}
+
 /* ── Main screen ───────────────────────────── */
 export default function InferenceScreen() {
     const { settings, update } = useSettings();
     const { add: addHistory } = useHistory();
     const { tc, typography: typ } = useThemeColors();
+    const isAndroid = Platform.OS === 'android';
     const liveStabilityWindowMs = Math.max(
         1000,
         Math.round((Number(settings.liveStabilityWindowSec) || (LIVE_STABILITY_DEFAULT_WINDOW_MS / 1000)) * 1000),
@@ -287,6 +349,12 @@ export default function InferenceScreen() {
     const [cameraActive, setCameraActive] = useState(false);
     const [liveRunning, setLiveRunning] = useState(false);
     const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
+    const [cameraSessionKey, setCameraSessionKey] = useState(0);
+    const [cameraReady, setCameraReady] = useState(false);
+    const [cameraReadyRetryCount, setCameraReadyRetryCount] = useState(0);
+    const [cameraPreviewSize, setCameraPreviewSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+    const [cameraCaptureSize, setCameraCaptureSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+    const [cameraDebugEvents, setCameraDebugEvents] = useState<CameraDebugEvent[]>([]);
     const [permission, requestPermission] = useCameraPermissions();
     const [timing, setTiming] = useState<number | null>(null);
     const [liveStability, setLiveStability] = useState<LiveStabilityStatus>({
@@ -297,6 +365,12 @@ export default function InferenceScreen() {
     const cameraRef = useRef<CameraView | null>(null);
     const webCamRef = useRef<WebLiveCameraRef>(null);
     const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const cameraReadyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const cameraReadySettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const cameraReadySessionRef = useRef<string>('');
+    const cameraReadyRetryCountRef = useRef(0);
+    const cameraLogDedupRef = useRef<Record<string, { details: string; at: number }>>({});
+    const captureInFlightRef = useRef(false);
     const liveRunningRef = useRef(false);
     const lastAnnouncementKeyRef = useRef<string>('');
     const lastAnnouncementAtRef = useRef<number>(0);
@@ -309,9 +383,44 @@ export default function InferenceScreen() {
     });
 
     const inferUrl = useMemo(
-        () => settings.apiBaseUrl.replace(/\/$/, '') + '/api/pipeline/infer',
-        [settings.apiBaseUrl]
+        () => settings.inferenceMode === 'offline'
+            ? 'on-device://bundled-pipeline'
+            : buildApiUrl(settings.apiBaseUrl, '/api/pipeline/infer'),
+        [settings.apiBaseUrl, settings.inferenceMode]
     );
+    const isOfflineMode = settings.inferenceMode === 'offline';
+    const cameraLogFileUri = useMemo(() => getCameraDiagnosticsLogUri(), []);
+
+    const logCameraEvent = useCallback((event: string, details?: unknown) => {
+        const detailsText = _toDebugString(details);
+        const detailsKey = detailsText || '';
+        const dedupeKey = `${event}::${detailsKey}`;
+        const now = Date.now();
+        const prev = cameraLogDedupRef.current[dedupeKey];
+        if (prev && (now - prev.at) < CAMERA_EVENT_DEDUP_WINDOW_MS) {
+            return;
+        }
+        cameraLogDedupRef.current[dedupeKey] = {
+            details: detailsKey,
+            at: now,
+        };
+        const entry: CameraDebugEvent = {
+            ts: new Date().toISOString(),
+            event,
+            details: detailsText || undefined,
+        };
+        if (!CAMERA_NOISY_EVENTS.has(event)) {
+            setCameraDebugEvents((prev) => [entry, ...prev].slice(0, 40));
+            appendCameraDiagnosticsEntry(entry);
+        }
+        if (settings.debugModeEnabled) {
+            if (detailsText) {
+                console.log(`[camera] ${event}: ${detailsText}`);
+            } else {
+                console.log(`[camera] ${event}`);
+            }
+        }
+    }, [settings.debugModeEnabled]);
 
     const effectiveResult = useMemo(
         () => (liveRunning ? (livePreviewResult || result) : result),
@@ -334,6 +443,41 @@ export default function InferenceScreen() {
         [result],
     );
     const guaranteedClassifierSummary = useMemo(() => _computeGuaranteedClassifierSummary(result), [result]);
+    const cameraDebugData = useMemo(() => ({
+        active: cameraActive,
+        ready: cameraReady,
+        readyRetries: cameraReadyRetryCount,
+        facing: cameraFacing,
+        previewSize: cameraPreviewSize,
+        captureSize: cameraCaptureSize,
+        logFileUri: cameraLogFileUri,
+        permission: permission
+            ? permission.granted ? 'granted' : permission.canAskAgain ? 'prompt' : 'denied'
+            : 'unknown',
+        events: cameraDebugEvents,
+    }), [cameraActive, cameraCaptureSize, cameraDebugEvents, cameraFacing, cameraPreviewSize, cameraReady, cameraReadyRetryCount, cameraLogFileUri, permission]);
+    const latestCameraEvent = useMemo(() => cameraDebugEvents[0] || null, [cameraDebugEvents]);
+
+    const clearCameraReadyTimer = useCallback(() => {
+        if (cameraReadyTimerRef.current) {
+            clearTimeout(cameraReadyTimerRef.current);
+            cameraReadyTimerRef.current = null;
+        }
+    }, []);
+    const clearCameraReadySettleTimer = useCallback(() => {
+        if (cameraReadySettleTimerRef.current) {
+            clearTimeout(cameraReadySettleTimerRef.current);
+            cameraReadySettleTimerRef.current = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        logCameraEvent('camera_log_session_started', {
+            platform: Platform.OS,
+            inferenceMode: settings.inferenceMode,
+            logFileUri: cameraLogFileUri || 'unavailable',
+        });
+    }, [cameraLogFileUri, logCameraEvent, settings.inferenceMode]);
 
     const speakAnnouncement = useCallback((text: string) => {
         const msg = String(text || '').trim();
@@ -372,6 +516,35 @@ export default function InferenceScreen() {
         },
         [addHistory]
     );
+
+    const prepareImageForServerUpload = useCallback(async (uri: string): Promise<ServerUploadAsset> => {
+        if (Platform.OS !== 'android') {
+            return {
+                uri,
+                name: 'image.jpg',
+                type: 'image/jpeg',
+            };
+        }
+
+        try {
+            const normalized = await manipulateAsync(
+                uri,
+                [],
+                { compress: 0.92, format: SaveFormat.JPEG },
+            );
+            return {
+                uri: normalized.uri,
+                name: 'image.jpg',
+                type: 'image/jpeg',
+            };
+        } catch {
+            return {
+                uri,
+                name: 'image.jpg',
+                type: 'image/jpeg',
+            };
+        }
+    }, []);
 
     const resetLiveStability = useCallback(() => {
         liveStabilityRef.current = {
@@ -476,7 +649,19 @@ export default function InferenceScreen() {
         let res: PipelineResponse | null = null;
         let ms: number | null = null;
         try {
-            const response = await fetch(inferUrl, { method: 'POST', body: fd });
+            let targetInferUrl = inferUrl;
+            if (!settings.debugModeEnabled) {
+                const probe = await resolveReachableApiBase(settings.apiBaseUrl, 4000);
+                if (!probe.ok) {
+                    throw new Error(probe.error || 'Backend unreachable');
+                }
+                if (probe.base !== settings.apiBaseUrl) {
+                    update({ apiBaseUrl: probe.base });
+                }
+                targetInferUrl = buildApiUrl(probe.base, '/api/pipeline/infer');
+            }
+
+            const response = await fetch(targetInferUrl, { method: 'POST', body: fd });
             const contentType = (response.headers.get('content-type') || '').toLowerCase();
             const body = contentType.includes('application/json') ? await response.json() : await response.text();
             if (!response.ok) {
@@ -518,13 +703,73 @@ export default function InferenceScreen() {
         }
     }
 
+    async function runInferOffline(
+        uri: string,
+        opts?: { skipHistory?: boolean; isLive?: boolean },
+    ) {
+        const skipHistory = Boolean(opts?.skipHistory);
+        const isLive = Boolean(opts?.isLive);
+        setBusy(true);
+        const t0 = Date.now();
+        let res: PipelineResponse | null = null;
+        let ms: number | null = null;
+        try {
+            res = await runOfflineInference(uri, {
+                topKTargets: isLive ? LIVE_TOP_K_TARGETS : STILL_TOP_K_TARGETS,
+                spoofGuardEnabled: settings.screenSpoofGuardEnabled,
+                confidenceThreshold: settings.confidenceThreshold,
+            });
+            ms = Date.now() - t0;
+
+            if (res?.error) {
+                throw new Error(res.error);
+            }
+
+            if (isLive) {
+                setLivePreviewResult(res);
+                const stable = applyLiveStability(res);
+                if (stable.stableResult) {
+                    setResult(stable.stableResult);
+                }
+                if (stable.accepted) {
+                    setTiming(ms);
+                }
+            } else {
+                setLivePreviewResult(null);
+                setResult(res);
+                setTiming(ms);
+                setLiveStability({
+                    ...LIVE_STABILITY_IDLE,
+                    remainingMs: liveStabilityWindowMs,
+                });
+            }
+        } catch (e: any) {
+            ms = Date.now() - t0;
+            res = { error: e?.message || String(e) };
+            setResult(res);
+            setTiming(ms);
+            if (isLive) {
+                setLivePreviewResult(null);
+                resetLiveStability();
+            }
+        } finally {
+            setBusy(false);
+            if (!skipHistory) recordHistory(res, ms, uri);
+        }
+    }
+
     async function runInferFromUri(uri: string, isLive = false) {
+        if (isOfflineMode) {
+            await runInferOffline(uri, { skipHistory: isLive, isLive });
+            return;
+        }
         const fd = new FormData();
         if (Platform.OS === 'web') {
             const blob = await (await fetch(uri)).blob();
             fd.append('file', blob, 'image.jpg');
         } else {
-            fd.append('file', { uri, name: 'image.jpg', type: 'image/jpeg' } as any);
+            const uploadAsset = await prepareImageForServerUpload(uri);
+            fd.append('file', uploadAsset as any);
         }
         fd.append('top_k_targets', isLive ? String(LIVE_TOP_K_TARGETS) : String(STILL_TOP_K_TARGETS));
         await runInferWithFormData(fd, uri, { skipHistory: isLive, isLive });
@@ -538,23 +783,129 @@ export default function InferenceScreen() {
         await runInferFromUri(imageUri, false);
     }
 
-    async function startCamera() {
-        if (!permission?.granted) {
-            const p = await requestPermission();
-            if (!p.granted) { setResult({ error: 'Camera permission denied' }); return; }
-        }
-        setLivePreviewResult(null);
-        resetLiveStability();
-        setCameraActive(true);
-    }
-
-    function stopCamera() {
+    const stopCamera = useCallback((reason = 'manual') => {
+        logCameraEvent('camera_stop', {
+            reason,
+            wasActive: cameraActive,
+            wasLive: liveRunningRef.current,
+        });
+        clearCameraReadyTimer();
+        clearCameraReadySettleTimer();
         setCameraActive(false);
+        setCameraReady(false);
+        setCameraReadyRetryCount(0);
+        cameraReadyRetryCountRef.current = 0;
+        cameraReadySessionRef.current = '';
+        captureInFlightRef.current = false;
         setLiveRunning(false);
+        setCameraPreviewSize({ width: 0, height: 0 });
+        setCameraCaptureSize({ width: 0, height: 0 });
         liveRunningRef.current = false;
         if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
         setLivePreviewResult(null);
         resetLiveStability();
+    }, [cameraActive, clearCameraReadySettleTimer, clearCameraReadyTimer, logCameraEvent, resetLiveStability]);
+
+    async function startCamera() {
+        logCameraEvent('camera_start_requested', {
+            platform: Platform.OS,
+            permissionKnown: Boolean(permission),
+            permissionGranted: permission?.granted ?? null,
+            canAskAgain: permission?.canAskAgain ?? null,
+        });
+        if (Platform.OS !== 'web' && !permission?.granted) {
+            const p = await requestPermission();
+            logCameraEvent('camera_permission_result', { granted: p.granted, canAskAgain: p.canAskAgain });
+            if (!p.granted) { setResult({ error: 'Camera permission denied' }); return; }
+        }
+        setResult(null);
+        setLivePreviewResult(null);
+        resetLiveStability();
+        clearCameraReadyTimer();
+        clearCameraReadySettleTimer();
+        setCameraReady(false);
+        setCameraReadyRetryCount(0);
+        cameraReadyRetryCountRef.current = 0;
+        cameraReadySessionRef.current = '';
+        captureInFlightRef.current = false;
+        setCameraPreviewSize({ width: 0, height: 0 });
+        setCameraCaptureSize({ width: 0, height: 0 });
+        setCameraSessionKey((prev) => prev + 1);
+        setCameraActive(true);
+        logCameraEvent('camera_active_true');
+    }
+
+    async function captureStillWithSystemCamera(opts?: { restartPreviewOnCancel?: boolean }) {
+        const restartPreviewOnCancel = Boolean(opts?.restartPreviewOnCancel);
+        logCameraEvent('system_camera_open_requested', { facing: cameraFacing });
+        const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
+        logCameraEvent('system_camera_permission_result', {
+            granted: cameraPerm.granted,
+            canAskAgain: cameraPerm.canAskAgain,
+        });
+        if (!cameraPerm.granted) {
+            setResult({ error: 'Camera permission denied' });
+            return;
+        }
+
+        stopCamera('switch_to_system_camera');
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        let captured: ImagePicker.ImagePickerResult;
+        try {
+            captured = await ImagePicker.launchCameraAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                quality: 1,
+                allowsEditing: false,
+                base64: false,
+                exif: false,
+                cameraType: cameraFacing === 'front' ? ImagePicker.CameraType.front : ImagePicker.CameraType.back,
+            });
+        } catch (error: any) {
+            const message = _buildCameraErrorMessage('Failed to capture image', error);
+            logCameraEvent('system_camera_open_failed', {
+                message,
+                name: error?.name,
+                code: error?.code,
+                stack: error?.stack,
+                raw: error,
+            });
+            setResult({ error: message });
+            return;
+        }
+
+        if (captured.canceled || !captured.assets?.length) {
+            logCameraEvent('system_camera_canceled');
+            setResult(null);
+            if (restartPreviewOnCancel) {
+                await startCamera();
+            }
+            return;
+        }
+
+        const asset = captured.assets[0];
+        if (!asset.uri) {
+            logCameraEvent('system_camera_no_uri', { asset });
+            setResult({
+                error: _buildCameraErrorMessage(
+                    'Camera capture returned no image',
+                    { assetWidth: asset.width, assetHeight: asset.height, fileName: asset.fileName },
+                ),
+            });
+            return;
+        }
+
+        logCameraEvent('system_camera_captured', {
+            uri: asset.uri,
+            width: asset.width,
+            height: asset.height,
+            fileSize: asset.fileSize,
+        });
+        if (Number(asset.width) > 0 && Number(asset.height) > 0) {
+            setCameraCaptureSize({ width: Number(asset.width), height: Number(asset.height) });
+        }
+        setImageUri(asset.uri);
+        await runInferFromUri(asset.uri, false);
     }
 
     async function captureAndInferOnce() {
@@ -582,19 +933,141 @@ export default function InferenceScreen() {
         }
 
         /* ── Native path: takePictureAsync ── */
-        if (!cameraRef.current) { setResult({ error: 'Camera not ready yet' }); return; }
-        const isLive = liveRunningRef.current;
-        if (!isLive) {
-            setResult(null);
-            setTiming(null);
+        if (!cameraReady) {
+            logCameraEvent('camera_capture_blocked_not_ready', {
+                cameraActive,
+                previewSize: cameraPreviewSize,
+                retries: cameraReadyRetryCountRef.current,
+            });
+            setResult({
+                error: `Camera is still initializing (preview=${cameraPreviewSize.width}x${cameraPreviewSize.height}). Please wait a moment and try again.`,
+            });
+            return;
         }
+
+        if (!cameraRef.current) {
+            logCameraEvent('camera_capture_without_ref', {
+                cameraActive,
+                previewSize: cameraPreviewSize,
+                captureSize: cameraCaptureSize,
+            });
+            setResult({
+                error: `Camera not ready yet (active=${cameraActive ? 'yes' : 'no'}, preview=${cameraPreviewSize.width}x${cameraPreviewSize.height})`,
+            });
+            return;
+        }
+        if (captureInFlightRef.current) {
+            logCameraEvent('camera_capture_blocked_inflight');
+            return;
+        }
+
+        captureInFlightRef.current = true;
         try {
-            const shot = await cameraRef.current.takePictureAsync({ quality: 0.8, skipProcessing: true });
-            if (!shot?.uri) { setResult({ error: 'Failed to capture frame' }); return; }
+            const isLive = liveRunningRef.current;
+            logCameraEvent('camera_capture_requested', {
+                isLive,
+                facing: cameraFacing,
+                previewSize: cameraPreviewSize,
+                captureSize: cameraCaptureSize,
+            });
+            if (!isLive) {
+                setResult(null);
+                setTiming(null);
+            }
+            let shot: any = null;
+            try {
+                if (Platform.OS === 'android') {
+                    await new Promise((resolve) => setTimeout(resolve, 120));
+                }
+                shot = await cameraRef.current.takePictureAsync({
+                    quality: 0.92,
+                    skipProcessing: false,
+                    exif: false,
+                } as any);
+            } catch (e: any) {
+                const message = _buildCameraErrorMessage('Camera capture failed', e);
+                logCameraEvent('camera_capture_failed', {
+                    message,
+                    name: e?.name,
+                    code: e?.code,
+                    stack: e?.stack,
+                    raw: e,
+                });
+
+                const shouldRetrySafeCapture = Platform.OS === 'android'
+                    && String(e?.code || '').toUpperCase().includes('ERR_IMAGE_CAPTURE_FAILED');
+                if (shouldRetrySafeCapture && cameraRef.current) {
+                    try {
+                        logCameraEvent('camera_capture_retry_safe_mode');
+                        try {
+                            await cameraRef.current.resumePreview();
+                        } catch {
+                            // Best effort only; continue with retry.
+                        }
+                        await new Promise((resolve) => setTimeout(resolve, 450));
+                        shot = await cameraRef.current.takePictureAsync({
+                            quality: 0.85,
+                            skipProcessing: false,
+                            exif: false,
+                        } as any);
+                        logCameraEvent('camera_capture_retry_succeeded', {
+                            width: shot?.width,
+                            height: shot?.height,
+                            uri: shot?.uri,
+                        });
+                    } catch (retryError: any) {
+                        const retryMessage = _buildCameraErrorMessage('Camera capture failed after retry', retryError);
+                        logCameraEvent('camera_capture_retry_failed', {
+                            message: retryMessage,
+                            name: retryError?.name,
+                            code: retryError?.code,
+                            stack: retryError?.stack,
+                            raw: retryError,
+                        });
+                        setCameraReady(false);
+                        cameraReadySessionRef.current = '';
+                        setCameraSessionKey((prev) => prev + 1);
+                        if (!isLive) {
+                            setResult({ error: `${retryMessage}. Opening system camera fallback.` });
+                            await captureStillWithSystemCamera({ restartPreviewOnCancel: true });
+                            return;
+                        }
+                        setResult({ error: retryMessage });
+                        return;
+                    }
+                } else {
+                    setResult({ error: message });
+                    return;
+                }
+            }
+
+            if (!shot?.uri) {
+                logCameraEvent('camera_capture_empty_result', { shot });
+                setResult({
+                    error: _buildCameraErrorMessage(
+                        'Failed to capture frame',
+                        {
+                            width: (shot as any)?.width,
+                            height: (shot as any)?.height,
+                            hasBase64: Boolean((shot as any)?.base64),
+                        },
+                    ),
+                });
+                return;
+            }
+            logCameraEvent('camera_capture_succeeded', {
+                uri: shot.uri,
+                width: shot.width,
+                height: shot.height,
+                base64: Boolean((shot as any).base64),
+            });
+            if (Number(shot.width) > 0 && Number(shot.height) > 0) {
+                setCameraCaptureSize({ width: Number(shot.width), height: Number(shot.height) });
+            }
             setImageUri(shot.uri);
             await runInferFromUri(shot.uri, isLive);
-        } catch (e: any) {
-            setResult({ error: e?.message || String(e) });
+        } finally {
+            captureInFlightRef.current = false;
         }
     }
 
@@ -610,6 +1083,15 @@ export default function InferenceScreen() {
     }
 
     function startLive() {
+        if (Platform.OS !== 'web' && !cameraReady) {
+            logCameraEvent('camera_live_blocked_not_ready', {
+                previewSize: cameraPreviewSize,
+                retries: cameraReadyRetryCountRef.current,
+            });
+            setResult({ error: 'Camera is still initializing. Wait for preview readiness before starting live mode.' });
+            return;
+        }
+        logCameraEvent('camera_live_start', { fps: settings.liveFps });
         if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
         setLiveRunning(true);
         liveRunningRef.current = true;
@@ -618,6 +1100,7 @@ export default function InferenceScreen() {
     }
 
     function stopLive() {
+        logCameraEvent('camera_live_stop');
         setLiveRunning(false);
         liveRunningRef.current = false;
         if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
@@ -627,10 +1110,68 @@ export default function InferenceScreen() {
 
     useEffect(() => {
         return () => {
+            clearCameraReadyTimer();
+            clearCameraReadySettleTimer();
             liveRunningRef.current = false;
             if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); }
         };
-    }, []);
+    }, [clearCameraReadySettleTimer, clearCameraReadyTimer]);
+
+    useEffect(() => {
+        if (Platform.OS === 'web') return;
+        clearCameraReadyTimer();
+        if (!cameraActive || cameraReady) return;
+
+        cameraReadyTimerRef.current = setTimeout(() => {
+            const nextRetry = cameraReadyRetryCountRef.current + 1;
+            if (nextRetry <= CAMERA_READY_MAX_RETRIES) {
+                cameraReadyRetryCountRef.current = nextRetry;
+                setCameraReadyRetryCount(nextRetry);
+                logCameraEvent('camera_ready_timeout', {
+                    retry: nextRetry,
+                    maxRetries: CAMERA_READY_MAX_RETRIES,
+                    facing: cameraFacing,
+                    previewSize: cameraPreviewSize,
+                });
+                setCameraSessionKey((prev) => prev + 1);
+                return;
+            }
+
+            logCameraEvent('camera_ready_timeout_exceeded', {
+                retries: cameraReadyRetryCountRef.current,
+                facing: cameraFacing,
+                previewSize: cameraPreviewSize,
+            });
+            stopCamera('camera_ready_timeout');
+            setResult({
+                error: `Camera preview failed to initialize after ${CAMERA_READY_MAX_RETRIES} retries. Please retry Start Camera or use System Camera.`,
+            });
+        }, CAMERA_READY_TIMEOUT_MS);
+
+        return clearCameraReadyTimer;
+    }, [
+        cameraActive,
+        cameraFacing,
+        cameraPreviewSize,
+        cameraReady,
+        cameraSessionKey,
+        clearCameraReadyTimer,
+        logCameraEvent,
+        stopCamera,
+    ]);
+
+    useEffect(() => {
+        if (Platform.OS === 'web' || !cameraActive) return;
+        const subscription = AppState.addEventListener('change', (nextState) => {
+            logCameraEvent('app_state_change', { nextState });
+            if (nextState === 'background') {
+                stopCamera('app_background');
+            }
+        });
+        return () => {
+            subscription.remove();
+        };
+    }, [cameraActive, logCameraEvent, stopCamera]);
 
     useEffect(() => {
         if (liveRunningRef.current) {
@@ -695,26 +1236,44 @@ export default function InferenceScreen() {
     return (
         <ScrollView style={[styles.container, { backgroundColor: tc.background }]} contentContainerStyle={styles.scroll}>
             {/* ── API Config ── */}
-            <SectionCard title="API Configuration" icon="settings-outline">
-                <View style={styles.inputRow}>
-                    <TextInput
-                        value={settings.apiBaseUrl}
-                        onChangeText={(v) => update({ apiBaseUrl: v })}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        placeholder="http://localhost:8080"
-                        placeholderTextColor={tc.textMuted}
-                        style={[styles.textInput, typ.mono, {
-                            backgroundColor: tc.surfaceElevated,
-                            color: tc.textPrimary,
-                            borderColor: tc.border,
-                        }]}
-                    />
-                </View>
-                <Text style={[typ.caption, { color: tc.textMuted, marginTop: spacing.xs }]}>
-                    Endpoint: {inferUrl}
-                </Text>
-            </SectionCard>
+            {settings.debugModeEnabled && (
+                <SectionCard title={isOfflineMode ? 'Inference Runtime' : 'API Configuration'} icon="settings-outline">
+                    {isOfflineMode ? (
+                        <>
+                            <View style={[styles.sectionHint, { backgroundColor: tc.accent + '12', borderColor: tc.accent + '35', marginBottom: 0 }]}>
+                                <Ionicons name="phone-portrait-outline" size={14} color={tc.accent} />
+                                <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                                    Offline mode runs entirely on this device using bundled ONNX models.
+                                </Text>
+                            </View>
+                            <Text style={[typ.caption, { color: tc.textMuted, marginTop: spacing.sm }]}>
+                                Runtime: {inferUrl}
+                            </Text>
+                        </>
+                    ) : (
+                        <>
+                            <View style={styles.inputRow}>
+                                <TextInput
+                                    value={settings.apiBaseUrl}
+                                    onChangeText={(v) => update({ apiBaseUrl: v })}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                    placeholder={HOSTED_API_BASE_URL}
+                                    placeholderTextColor={tc.textMuted}
+                                    style={[styles.textInput, typ.mono, {
+                                        backgroundColor: tc.surfaceElevated,
+                                        color: tc.textPrimary,
+                                        borderColor: tc.border,
+                                    }]}
+                                />
+                            </View>
+                            <Text style={[typ.caption, { color: tc.textMuted, marginTop: spacing.xs }]}>
+                                Endpoint: {inferUrl}
+                            </Text>
+                        </>
+                    )}
+                </SectionCard>
+            )}
 
             {/* ── Upload ── */}
             <SectionCard title="Upload Image" icon="image-outline">
@@ -732,10 +1291,30 @@ export default function InferenceScreen() {
             </SectionCard>
 
             {/* ── Camera ── */}
-            <SectionCard title="Live Camera" icon="videocam-outline">
+            <SectionCard title={Platform.OS === 'web' ? 'Live Camera' : 'Camera'} icon="videocam-outline">
                 {!cameraActive ? (
-                    <GradientButton title="Start Camera" onPress={startCamera} variant="accent" size="sm"
-                        icon={<Ionicons name="camera-outline" size={16} color="#FFF" />} />
+                    <View style={styles.cameraBlock}>
+                        <GradientButton title="Start Camera" onPress={startCamera} variant="accent" size="sm"
+                            icon={<Ionicons name="camera-outline" size={16} color="#FFF" />} />
+                        {isAndroid && (
+                            <>
+                                <View style={[styles.sectionHint, { backgroundColor: tc.accent + '12', borderColor: tc.accent + '35' }]}>
+                                    <Ionicons name="phone-portrait-outline" size={14} color={tc.accent} />
+                                    <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                                        Use the in-app preview for scanning. If Android camera capture misbehaves, the system camera is available as a fallback.
+                                    </Text>
+                                </View>
+                                <GradientButton
+                                    title="Use System Camera"
+                                    onPress={() => captureStillWithSystemCamera({ restartPreviewOnCancel: false })}
+                                    disabled={busy}
+                                    variant="outline"
+                                    size="sm"
+                                    icon={<Ionicons name="scan-outline" size={16} color={tc.primary} />}
+                                />
+                            </>
+                        )}
+                    </View>
                 ) : (
                     <View style={styles.cameraBlock}>
                         {Platform.OS === 'web' ? (
@@ -745,45 +1324,144 @@ export default function InferenceScreen() {
                                 detections={detections}
                                 active={cameraActive}
                                 height={300}
-                                onError={(msg) => setResult({ error: msg })}
+                                onError={(msg) => {
+                                    logCameraEvent('web_camera_error', msg);
+                                    setResult({ error: msg });
+                                }}
                             />
                         ) : (
-                            <CameraView key={cameraFacing} ref={cameraRef} style={styles.cameraPreview} facing={cameraFacing} />
-                        )}
-                        <View style={styles.cameraControls}>
-                            <GradientButton title="Snap" onPress={captureAndInferOnce} disabled={busy} size="sm"
-                                icon={<Ionicons name="scan-outline" size={14} color="#FFF" />} />
-                            <GradientButton
-                                title={liveRunning ? 'Stop Live' : `Go Live (${settings.liveFps} fps)`}
-                                onPress={liveRunning ? stopLive : startLive}
-                                variant={liveRunning ? 'outline' : 'accent'}
-                                size="sm"
-                                icon={<Ionicons name={liveRunning ? 'pause' : 'play'} size={14} color={liveRunning ? tc.primary : '#FFF'} />}
-                            />
-                            <GradientButton
-                                title={cameraFacing === 'back' ? 'Front' : 'Back'}
-                                onPress={() => setCameraFacing((f) => (f === 'back' ? 'front' : 'back'))}
-                                variant="outline" size="sm"
-                                icon={<Ionicons name="camera-reverse-outline" size={14} color={tc.primary} />}
-                            />
-                        </View>
-                        {liveRunning && (
-                            <View style={[styles.liveStatus, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}>
-                                <Ionicons
-                                    name={liveStability.mode === 'stable' ? 'checkmark-circle' : 'time-outline'}
-                                    size={14}
-                                    color={liveStability.mode === 'stable' ? tc.accent : tc.textMuted}
+                                <View
+                                    style={styles.cameraPreviewFrame}
+                                    onLayout={(event) => {
+                                        const { width, height } = event.nativeEvent.layout;
+                                        setCameraPreviewSize((prev) => {
+                                            if (prev.width === width && prev.height === height) return prev;
+                                            logCameraEvent('camera_preview_layout', { width, height });
+                                            return { width, height };
+                                        });
+                                    }}
+                                >
+                                    <CameraView
+                                        key={`${cameraFacing}-${cameraSessionKey}`}
+                                        ref={cameraRef}
+                                        style={styles.cameraPreview}
+                                        active={cameraActive}
+                                        facing={cameraFacing}
+                                        ratio={isAndroid ? '4:3' : undefined}
+                                        onCameraReady={() => {
+                                            clearCameraReadyTimer();
+                                            clearCameraReadySettleTimer();
+                                            const stabilizeMs = Platform.OS === 'android' ? 500 : 0;
+                                            const readySession = `${cameraFacing}-${cameraSessionKey}`;
+                                            cameraReadySettleTimerRef.current = setTimeout(() => {
+                                                if (cameraReadySessionRef.current === readySession) return;
+                                                cameraReadySessionRef.current = readySession;
+                                                setCameraReady(true);
+                                                logCameraEvent('camera_ready', {
+                                                    facing: cameraFacing,
+                                                    retryCount: cameraReadyRetryCountRef.current,
+                                                    previewSize: cameraPreviewSize,
+                                                    stabilizeMs,
+                                                });
+                                            }, stabilizeMs);
+                                        }}
+                                        onMountError={(event: any) => {
+                                            clearCameraReadyTimer();
+                                            clearCameraReadySettleTimer();
+                                            setCameraReady(false);
+                                            cameraReadySessionRef.current = '';
+                                            const payload = event?.nativeEvent || event || null;
+                                            logCameraEvent('camera_mount_error', payload);
+                                            const message = _buildCameraErrorMessage('Camera failed to start', payload);
+                                            setResult({ error: message });
+                                        }}
+                                    />
+                                    <DetectionOverlay
+                                        detections={detections}
+                                        width={cameraPreviewSize.width}
+                                        height={cameraPreviewSize.height}
+                                        sourceWidth={cameraCaptureSize.width}
+                                        sourceHeight={cameraCaptureSize.height}
+                                        resizeMode="cover"
+                                        mirrored={cameraFacing === 'front'}
+                                    />
+                                </View>
+                            )}
+                            <View style={styles.cameraControls}>
+                                <GradientButton
+                                    title="Snap"
+                                    onPress={captureAndInferOnce}
+                                    disabled={busy || (Platform.OS !== 'web' && !cameraReady)}
+                                    size="sm"
+                                    icon={<Ionicons name="scan-outline" size={14} color="#FFF" />} />
+                                {isAndroid && (
+                                    <GradientButton
+                                        title="System Camera"
+                                        onPress={() => captureStillWithSystemCamera({ restartPreviewOnCancel: true })}
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={busy}
+                                        icon={<Ionicons name="camera-outline" size={14} color={tc.primary} />}
+                                    />
+                                )}
+                                <GradientButton
+                                    title={liveRunning ? 'Stop Live' : `Go Live (${settings.liveFps} fps)`}
+                                    onPress={liveRunning ? stopLive : startLive}
+                                    variant={liveRunning ? 'outline' : 'accent'}
+                                    size="sm"
+                                    disabled={busy || (!liveRunning && Platform.OS !== 'web' && !cameraReady)}
+                                    icon={<Ionicons name={liveRunning ? 'pause' : 'play'} size={14} color={liveRunning ? tc.primary : '#FFF'} />}
                                 />
-                                <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
-                                    {liveStability.mode === 'stable'
-                                        ? `Stable ${liveStability.className || ''} (${liveStability.seenFrames} frames)`
-                                        : `Stabilizing ${liveStability.className || ''} (${Math.ceil(liveStability.remainingMs / 1000)}s)`}
-                                </Text>
+                                <GradientButton
+                                    title={cameraFacing === 'back' ? 'Front' : 'Back'}
+                                    onPress={() => {
+                                        clearCameraReadySettleTimer();
+                                        setCameraReady(false);
+                                        setCameraReadyRetryCount(0);
+                                        cameraReadyRetryCountRef.current = 0;
+                                        cameraReadySessionRef.current = '';
+                                        setCameraCaptureSize({ width: 0, height: 0 });
+                                        logCameraEvent('camera_facing_toggle', { from: cameraFacing });
+                                        setCameraSessionKey((prev) => prev + 1);
+                                        setCameraFacing((f) => (f === 'back' ? 'front' : 'back'));
+                                    }}
+                                    variant="outline" size="sm"
+                                    icon={<Ionicons name="camera-reverse-outline" size={14} color={tc.primary} />}
+                                />
                             </View>
-                        )}
-                        <GradientButton title="Stop Camera" onPress={stopCamera} variant="outline" size="sm"
-                            icon={<Ionicons name="close" size={14} color={tc.primary} />}
-                            style={{ marginTop: spacing.sm }} />
+                            {Platform.OS !== 'web' && !cameraReady && (
+                                <View style={[styles.sectionHint, { backgroundColor: tc.warning + '12', borderColor: tc.warning + '35' }]}>
+                                    <Ionicons name="time-outline" size={14} color={tc.warning} />
+                                    <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                                        {`Starting camera (attempt ${Math.min(cameraReadyRetryCount + 1, CAMERA_READY_MAX_RETRIES + 1)} of ${CAMERA_READY_MAX_RETRIES + 1})...`}
+                                    </Text>
+                                </View>
+                            )}
+                            {settings.debugModeEnabled && latestCameraEvent && (
+                                <View style={[styles.sectionHint, { backgroundColor: tc.info + '12', borderColor: tc.info + '35' }]}>
+                                    <Ionicons name="bug-outline" size={14} color={tc.info} />
+                                    <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                                        {`${latestCameraEvent.event}: ${_truncateLine(latestCameraEvent.details || 'no details')}`}
+                                    </Text>
+                                </View>
+                            )}
+                            {liveRunning && (
+                                <View style={[styles.liveStatus, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}>
+                                    <Ionicons
+                                        name={liveStability.mode === 'stable' ? 'checkmark-circle' : 'time-outline'}
+                                        size={14}
+                                        color={liveStability.mode === 'stable' ? tc.accent : tc.textMuted}
+                                    />
+                                    <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                                        {liveStability.mode === 'stable'
+                                            ? `Stable ${liveStability.className || ''} (${liveStability.seenFrames} frames)`
+                                            : `Stabilizing ${liveStability.className || ''} (${Math.ceil(liveStability.remainingMs / 1000)}s)`}
+                                    </Text>
+                                </View>
+                            )}
+                            <GradientButton title="Stop Camera" onPress={stopCamera} variant="outline" size="sm"
+                                icon={<Ionicons name="close" size={14} color={tc.primary} />}
+                                style={{ marginTop: spacing.sm }} />
                     </View>
                 )}
             </SectionCard>
@@ -939,8 +1617,14 @@ export default function InferenceScreen() {
                 </SectionCard>
             )}
 
-            {settings.showDebugPanel && (
-                <DebugPanel jsonData={result} timing={timing} apiUrl={inferUrl} pipelineModels={pipelineModels} />
+            {settings.debugModeEnabled && (
+                <DebugPanel
+                    jsonData={result}
+                    timing={timing}
+                    apiUrl={inferUrl}
+                    pipelineModels={pipelineModels}
+                    cameraDebug={cameraDebugData}
+                />
             )}
 
             <View style={{ height: spacing.huge }} />
@@ -957,7 +1641,8 @@ const styles = StyleSheet.create({
     textInput: { flex: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: 1 },
     buttonRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
     cameraBlock: { gap: spacing.sm },
-    cameraPreview: { width: '100%', height: 280, borderRadius: radii.md, overflow: 'hidden' },
+    cameraPreviewFrame: { width: '100%', height: 280, borderRadius: radii.md, overflow: 'hidden', position: 'relative', backgroundColor: '#000000' },
+    cameraPreview: { width: '100%', height: '100%' },
     cameraControls: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
     liveStatus: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
     previewCard: { borderRadius: radii.lg, overflow: 'hidden', borderWidth: 1 },

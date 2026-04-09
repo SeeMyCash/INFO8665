@@ -190,3 +190,22 @@ For the database mode, the main settings are:
 - `DB_SSLMODE`
 
 Secrets can come from direct env vars, `*_FILE` overrides such as `DB_PASSWORD_FILE`, or mounted secret directories like `/run/secrets/db_password`. The API exposes sanitized diagnostics at `/api/storage/status` and recent records at `/api/storage/history`.
+
+## Android offline app bundle
+
+The React Native app under `training/app/rn_app` now supports an Android-only offline inference mode that keeps currency detection on the device with bundled ONNX models.
+
+- Refresh the mobile model bundle: `cd training/app/rn_app && npm run bundle:models:android`
+- Verify TypeScript: `cd training/app/rn_app && npm run typecheck`
+- Prepare the native Android project: `cd training/app/rn_app && npm run prebuild:android`
+- Build a debug APK on Windows from a short path: `subst X: C:\path\to\INFO8665 && cd /d X:\training\app\rn_app\android && gradlew.bat clean assembleDebug`
+- Build a release APK with the embedded JS bundle: `subst X: C:\path\to\INFO8665 && cd /d X:\training\app\rn_app\android && set NODE_ENV=production && gradlew.bat assembleRelease`
+
+Important notes:
+
+- Offline mode uses `onnxruntime-react-native`, so it requires a custom Android build and will not run inside Expo Go.
+- The app defaults to offline inference on Android and still keeps a server mode for demos or debugging.
+- `eas.json` includes a `preview` profile for APK output when you want to build an installable Android artifact.
+- ONNX Runtime's native Android build can exceed Windows path limits in deep folders, so using a short mapped drive such as `X:` avoids CMake and Ninja failures during APK builds.
+- The debug APK is written to `training/app/rn_app/android/app/build/outputs/apk/debug/app-debug.apk`.
+- The release APK is written to `training/app/rn_app/android/app/build/outputs/apk/release/app-release.apk`.

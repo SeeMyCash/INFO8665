@@ -4,10 +4,16 @@
  */
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import type { InferenceMode } from '../services/offlineTypes';
+import { HOSTED_API_BASE_URL, normalizeApiBaseUrl } from '../services/serverApi';
 
 const STORAGE_KEY = '@smc/settings';
+const DEFAULT_API_BASE_URL = HOSTED_API_BASE_URL;
+const SETTINGS_SCHEMA_VERSION = 2;
 
 export type Settings = {
+    inferenceMode: InferenceMode;
     apiBaseUrl: string;
     confidenceThreshold: number;
     screenSpoofGuardEnabled: boolean;
@@ -22,11 +28,12 @@ export type Settings = {
     highContrast: boolean;
     largeFonts: boolean;
     hapticFeedback: boolean;
-    showDebugPanel: boolean;
+    debugModeEnabled: boolean;
 };
 
 const DEFAULT_SETTINGS: Settings = {
-    apiBaseUrl: (process.env.EXPO_PUBLIC_API_BASE_URL as string | undefined) || (typeof window !== 'undefined' ? window.location.origin : 'https://smc.femilawal.com'),
+    inferenceMode: Platform.OS === 'android' ? 'offline' : 'server',
+    apiBaseUrl: DEFAULT_API_BASE_URL,
     confidenceThreshold: 0.25,
     screenSpoofGuardEnabled: false,
     cameraResolution: 'medium',
@@ -40,7 +47,21 @@ const DEFAULT_SETTINGS: Settings = {
     highContrast: false,
     largeFonts: false,
     hapticFeedback: true,
-    showDebugPanel: true,
+    debugModeEnabled: false,
+};
+
+function sanitizeSettings(input: Partial<Settings>) {
+    const merged: Settings = {
+        ...DEFAULT_SETTINGS,
+        ...input,
+        apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? DEFAULT_SETTINGS.apiBaseUrl),
+    };
+
+    return merged;
+}
+
+type PersistedSettings = Partial<Settings> & {
+    __schemaVersion?: number;
 };
 
 type SettingsContextType = {
@@ -72,9 +93,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             try {
                 const stored = await AsyncStorage.getItem(STORAGE_KEY);
                 if (stored) {
-                    const parsed = JSON.parse(stored);
-                    // Merge with defaults to handle new keys added in updates
-                    setSettings((prev) => ({ ...prev, ...parsed }));
+                    const parsed = JSON.parse(stored) as PersistedSettings;
+                    const migrated = { ...parsed };
+                    if ((parsed.__schemaVersion ?? 0) < SETTINGS_SCHEMA_VERSION) {
+                        migrated.debugModeEnabled = false;
+                    }
+                    delete migrated.__schemaVersion;
+                    setSettings(sanitizeSettings(migrated));
                 }
             } catch (e) {
                 console.warn('[SettingsContext] Failed to load settings:', e);
@@ -88,13 +113,16 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     // Persist settings to AsyncStorage whenever they change (after initial load)
     useEffect(() => {
         if (!isInitialized.current) return;
-        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(settings)).catch((e) =>
+        AsyncStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({ __schemaVersion: SETTINGS_SCHEMA_VERSION, ...settings }),
+        ).catch((e) =>
             console.warn('[SettingsContext] Failed to save settings:', e)
         );
     }, [settings]);
 
     const update = useCallback((partial: Partial<Settings>) => {
-        setSettings((prev) => ({ ...prev, ...partial }));
+        setSettings((prev) => sanitizeSettings({ ...prev, ...partial }));
     }, []);
 
     const reset = useCallback(() => {

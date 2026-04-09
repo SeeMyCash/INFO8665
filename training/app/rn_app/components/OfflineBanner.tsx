@@ -3,27 +3,31 @@ import { View, Text, Pressable, StyleSheet, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../theme';
 import { useSettings } from '../contexts/SettingsContext';
+import { resolveReachableApiBase } from '../services/serverApi';
 
 /**
  * Persistent offline banner — polls the backend and shows a banner when unreachable.
  * Auto-retries every 10 seconds. Tap to retry immediately.
  */
 export default function OfflineBanner() {
-    const { settings } = useSettings();
+    const { settings, update } = useSettings();
     const [offline, setOffline] = useState(false);
     const [retrying, setRetrying] = useState(false);
+    const [detail, setDetail] = useState('Tap to retry');
     const slideAnim = useRef(new Animated.Value(-50)).current;
 
     async function checkHealth() {
-        try {
-            const res = await fetch(settings.apiBaseUrl.replace(/\/$/, '') + '/api/health', {
-                signal: AbortSignal.timeout(4000),
-            });
-            if (res.ok) {
-                setOffline(false);
-                return;
+        const probe = await resolveReachableApiBase(settings.apiBaseUrl, 4000);
+        if (probe.ok) {
+            if (probe.base !== settings.apiBaseUrl) {
+                update({ apiBaseUrl: probe.base });
             }
-        } catch { }
+            setDetail('Connected');
+            setOffline(false);
+            return;
+        }
+
+        setDetail(probe.error || 'Tap to retry');
         setOffline(true);
     }
 
@@ -34,10 +38,14 @@ export default function OfflineBanner() {
     }
 
     useEffect(() => {
+        if (settings.inferenceMode === 'offline') {
+            setOffline(false);
+            return;
+        }
         checkHealth();
         const timer = setInterval(checkHealth, 10000);
         return () => clearInterval(timer);
-    }, [settings.apiBaseUrl]);
+    }, [settings.apiBaseUrl, settings.inferenceMode]);
 
     useEffect(() => {
         Animated.timing(slideAnim, {
@@ -47,7 +55,7 @@ export default function OfflineBanner() {
         }).start();
     }, [offline]);
 
-    if (!offline) return null;
+    if (settings.inferenceMode === 'offline' || !offline) return null;
 
     return (
         <Animated.View
@@ -71,7 +79,7 @@ export default function OfflineBanner() {
                 <Text style={styles.text}>
                     {retrying ? 'Retrying…' : 'Backend unreachable'}
                 </Text>
-                <Text style={styles.tap}>Tap to retry</Text>
+                <Text style={styles.tap}>{retrying ? 'Checking connection…' : detail}</Text>
             </Pressable>
         </Animated.View>
     );

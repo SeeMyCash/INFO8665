@@ -8,6 +8,8 @@ import AnimatedCard from '../components/AnimatedCard';
 import GradientButton from '../components/GradientButton';
 import { SkeletonCard } from '../components/SkeletonLoader';
 import { useToast } from '../components/Toast';
+import { getOfflinePipelineStatus } from '../services/offlinePipeline';
+import { buildApiUrl, resolveReachableApiBase } from '../services/serverApi';
 import { spacing, radii, shadows } from '../theme';
 
 type HealthData = {
@@ -38,10 +40,11 @@ type StatsData = {
 };
 
 export default function DiagnosticsScreen() {
-    const { settings } = useSettings();
+    const { settings, update } = useSettings();
     const { entries } = useHistory();
     const { tc, typography: typ } = useThemeColors();
     const { show } = useToast();
+    const isOfflineMode = settings.inferenceMode === 'offline';
 
     const [health, setHealth] = useState<HealthData | null>(null);
     const [version, setVersion] = useState<VersionData | null>(null);
@@ -57,10 +60,48 @@ export default function DiagnosticsScreen() {
         setLoading(true);
         setError(null);
         try {
+            if (isOfflineMode) {
+                const offlineStatus = await getOfflinePipelineStatus();
+                setHealth({
+                    ok: offlineStatus.ready,
+                    pipeline: offlineStatus.pipeline,
+                    pipeline_error: offlineStatus.error,
+                    available_models: offlineStatus.availableModels,
+                    active_model: null,
+                    active_kind: 'offline',
+                });
+                setVersion({
+                    version: 'offline-bundled',
+                    uptime_seconds: 0,
+                    torch_available: false,
+                    cuda_available: false,
+                    device: offlineStatus.platform,
+                    models_dir: 'bundled-assets',
+                    models_count: offlineStatus.availableModels.length,
+                });
+                setStats({
+                    inference_count: entries.length,
+                    inference_errors: entries.filter((entry) => Boolean(entry.error)).length,
+                    avg_latency_ms: successfulEntries.length > 0 ? avgLatency : null,
+                    last_latency_ms: entries[0]?.timing ?? null,
+                    uptime_seconds: 0,
+                });
+                setLoading(false);
+                return;
+            }
+
+            const probe = await resolveReachableApiBase(base, 5000);
+            if (!probe.ok) {
+                throw new Error(probe.error || 'Backend unreachable');
+            }
+            if (probe.base !== settings.apiBaseUrl) {
+                update({ apiBaseUrl: probe.base });
+            }
+
             const [healthRes, versionRes, statsRes] = await Promise.allSettled([
-                fetch(`${base}/api/health`, { signal: AbortSignal.timeout(5000) }),
-                fetch(`${base}/api/version`, { signal: AbortSignal.timeout(5000) }),
-                fetch(`${base}/api/pipeline/stats`, { signal: AbortSignal.timeout(5000) }),
+                fetch(buildApiUrl(probe.base, '/api/health'), { signal: AbortSignal.timeout(5000) }),
+                fetch(buildApiUrl(probe.base, '/api/version'), { signal: AbortSignal.timeout(5000) }),
+                fetch(buildApiUrl(probe.base, '/api/pipeline/stats'), { signal: AbortSignal.timeout(5000) }),
             ]);
 
             if (healthRes.status === 'fulfilled' && healthRes.value.ok) {
@@ -83,18 +124,40 @@ export default function DiagnosticsScreen() {
         }
     }
 
-    useEffect(() => { fetchAll(); }, [settings.apiBaseUrl]);
+    useEffect(() => {
+        if (!settings.debugModeEnabled) {
+            setHealth(null);
+            setVersion(null);
+            setStats(null);
+            setError(null);
+            setLoading(false);
+            return;
+        }
+        fetchAll();
+    }, [entries.length, settings.apiBaseUrl, settings.debugModeEnabled, settings.inferenceMode]);
 
     const onRefresh = React.useCallback(async () => {
+        if (!settings.debugModeEnabled) return;
         setRefreshing(true);
         await fetchAll();
         setRefreshing(false);
-    }, [settings.apiBaseUrl]);
+    }, [entries.length, settings.apiBaseUrl, settings.debugModeEnabled, settings.inferenceMode]);
 
     const handleSyncModels = async () => {
+        if (isOfflineMode) {
+            show('Bundled offline models are already stored on-device', 'success');
+            return;
+        }
         setSyncing(true);
         try {
-            const res = await fetch(`${base}/api/pipeline/refresh`, { method: 'POST' });
+            const probe = await resolveReachableApiBase(base, 5000);
+            if (!probe.ok) {
+                throw new Error(probe.error || 'Backend unreachable');
+            }
+            if (probe.base !== settings.apiBaseUrl) {
+                update({ apiBaseUrl: probe.base });
+            }
+            const res = await fetch(buildApiUrl(probe.base, '/api/pipeline/refresh'), { method: 'POST' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             show(`Models refreshed: ${data.available_models?.length || 0} available`, 'success');
@@ -159,6 +222,25 @@ export default function DiagnosticsScreen() {
         return `${(s / 3600).toFixed(1)}h`;
     };
 
+    if (!settings.debugModeEnabled) {
+        return (
+            <ScrollView
+                style={[styles.container, { backgroundColor: tc.background }]}
+                contentContainerStyle={styles.scroll}
+            >
+                <View style={[cardStyle, shadows.card]}>
+                    <View style={styles.cardHeader}>
+                        <Ionicons name="code-slash-outline" size={18} color={tc.primary} />
+                        <Text style={[typ.h3, { color: tc.textPrimary }]}>Debug Mode Required</Text>
+                    </View>
+                    <Text style={[typ.body, { color: tc.textSecondary }]}>
+                        Enable Debug Mode in Settings to view diagnostics, backend details, and raw inference output.
+                    </Text>
+                </View>
+            </ScrollView>
+        );
+    }
+
     return (
         <ScrollView
             style={[styles.container, { backgroundColor: tc.background }]}
@@ -169,7 +251,7 @@ export default function DiagnosticsScreen() {
             }
         >
             {/* ── Server Info ── */}
-            {section('Server', 'server-outline', 0,
+            {section(isOfflineMode ? 'On-device Runtime' : 'Server', 'server-outline', 0,
                 loading ? <SkeletonCard lines={3} /> : error ? (
                     <View style={[styles.errorBox, { backgroundColor: tc.error + '15' }]}>
                         <Ionicons name="alert-circle" size={16} color={tc.error} />
@@ -185,8 +267,8 @@ export default function DiagnosticsScreen() {
                         </View>
                         {version && (
                             <View style={{ marginTop: spacing.md }}>
-                                {infoRow('Models on disk', String(version.models_count))}
-                                {infoRow('CUDA', version.cuda_available ? 'Available' : 'Not available')}
+                                {infoRow(isOfflineMode ? 'Bundled models' : 'Models on disk', String(version.models_count))}
+                                {infoRow(isOfflineMode ? 'Execution' : 'CUDA', isOfflineMode ? 'ONNX Runtime' : (version.cuda_available ? 'Available' : 'Not available'))}
                             </View>
                         )}
                     </>
@@ -229,7 +311,7 @@ export default function DiagnosticsScreen() {
             )}
 
             {/* ── Server-Side Stats ── */}
-            {section('Server Statistics', 'analytics-outline', 200,
+            {section(isOfflineMode ? 'Runtime Statistics' : 'Server Statistics', 'analytics-outline', 200,
                 loading ? <SkeletonCard lines={2} /> : stats ? (
                     <View style={styles.metricsRow}>
                         {metric('Inferences', String(stats.inference_count), tc.primary)}
@@ -238,7 +320,7 @@ export default function DiagnosticsScreen() {
                         {metric('Last', stats.last_latency_ms != null ? `${stats.last_latency_ms}ms` : '—')}
                     </View>
                 ) : (
-                    <Text style={[typ.body, { color: tc.textMuted }]}>No server stats yet</Text>
+                    <Text style={[typ.body, { color: tc.textMuted }]}>{isOfflineMode ? 'No offline runtime stats yet' : 'No server stats yet'}</Text>
                 )
             )}
 
@@ -269,7 +351,7 @@ export default function DiagnosticsScreen() {
             {/* ── Available Models List ── */}
             {section('Available Models', 'folder-open-outline', 500,
                 loading ? <SkeletonCard lines={2} /> : (health?.available_models?.length || 0) === 0 ? (
-                    <Text style={[typ.body, { color: tc.textMuted }]}>No models on disk</Text>
+                    <Text style={[typ.body, { color: tc.textMuted }]}>{isOfflineMode ? 'No bundled models found' : 'No models on disk'}</Text>
                 ) : (
                     <>
                         {health!.available_models.map((m) => (

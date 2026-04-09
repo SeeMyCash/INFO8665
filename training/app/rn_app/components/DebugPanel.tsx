@@ -8,9 +8,20 @@ type Props = {
     timing?: number | null;
     apiUrl?: string;
     pipelineModels?: Record<string, string | null> | null;
+    cameraDebug?: {
+        active?: boolean;
+        ready?: boolean;
+        readyRetries?: number;
+        facing?: 'front' | 'back';
+        previewSize?: { width: number; height: number };
+        captureSize?: { width: number; height: number };
+        logFileUri?: string | null;
+        permission?: string;
+        events?: Array<{ ts: string; event: string; details?: string }>;
+    } | null;
 };
 
-export default function DebugPanel({ jsonData, timing, apiUrl, pipelineModels }: Props) {
+export default function DebugPanel({ jsonData, timing, apiUrl, pipelineModels, cameraDebug }: Props) {
     const [expanded, setExpanded] = useState(false);
 
     return (
@@ -55,6 +66,36 @@ export default function DebugPanel({ jsonData, timing, apiUrl, pipelineModels }:
                                     </Text>
                                 </View>
                             ))}
+                        </View>
+                    )}
+
+                    {cameraDebug && (
+                        <View style={styles.section}>
+                            <Text style={styles.label}>Camera Diagnostics</Text>
+                            <View style={styles.cameraStatusRow}>
+                                <Text style={styles.valueSmall}>Active: {cameraDebug.active ? 'yes' : 'no'}</Text>
+                                <Text style={styles.valueSmall}>Ready: {cameraDebug.ready ? 'yes' : 'no'}</Text>
+                                <Text style={styles.valueSmall}>Facing: {cameraDebug.facing || 'n/a'}</Text>
+                                <Text style={styles.valueSmall}>Permission: {cameraDebug.permission || 'unknown'}</Text>
+                                <Text style={styles.valueSmall}>Retries: {Number(cameraDebug.readyRetries || 0)}</Text>
+                            </View>
+                            <Text style={styles.valueSmall}>
+                                Preview: {cameraDebug.previewSize?.width || 0}×{cameraDebug.previewSize?.height || 0}
+                                {' '}| Capture: {cameraDebug.captureSize?.width || 0}×{cameraDebug.captureSize?.height || 0}
+                            </Text>
+                            <Text style={styles.valueSmall} numberOfLines={1}>
+                                Log File: {cameraDebug.logFileUri || 'unavailable'}
+                            </Text>
+                            <View style={styles.cameraLogBox}>
+                                <Text selectable style={styles.jsonText}>
+                                    {(cameraDebug.events && cameraDebug.events.length > 0)
+                                        ? cameraDebug.events
+                                            .map((entry) =>
+                                                `[${entry.ts}] ${entry.event}${entry.details ? ` — ${entry.details}` : ''}`)
+                                            .join('\n')
+                                        : '— no camera events yet —'}
+                                </Text>
+                            </View>
                         </View>
                     )}
 
@@ -152,6 +193,17 @@ const styles = StyleSheet.create({
         borderRadius: radii.sm,
         padding: spacing.md,
         maxHeight: 300,
+    },
+    cameraStatusRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: spacing.sm,
+    },
+    cameraLogBox: {
+        backgroundColor: colors.background,
+        borderRadius: radii.sm,
+        padding: spacing.md,
+        maxHeight: 220,
     },
     jsonText: {
         ...typography.mono,

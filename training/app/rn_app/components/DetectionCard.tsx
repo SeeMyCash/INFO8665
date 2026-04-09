@@ -6,6 +6,7 @@ import { colors, radii, spacing, typography, shadows } from '../theme';
 type Detection = {
     class_id?: number;
     class_name?: string;
+    display_name?: string;
     confidence?: number;
     xyxy?: number[];
     box_area_ratio?: number;
@@ -27,7 +28,7 @@ const CLASS_COLORS: Record<string, string> = {
 
 export default function DetectionCard({ detection, index }: Props) {
     const confidence = detection.confidence ?? 0;
-    const className = detection.class_name ?? `Class ${detection.class_id ?? '?'}`;
+    const className = detection.display_name ?? detection.class_name ?? `Class ${detection.class_id ?? '?'}`;
     const barColor = CLASS_COLORS[className] || colors.primary;
     const pct = Math.round(confidence * 100);
 

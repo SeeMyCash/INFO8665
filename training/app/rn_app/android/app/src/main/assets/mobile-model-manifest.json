@@ -1,0 +1,91 @@
+{
+  "generated_at": "2026-04-08T22:20:56.946196+00:00",
+  "assets_dir": "C:/Users/femil/Documents/PersonalProjects/SMC_data/INFO8665/training/app/rn_app/assets/models",
+  "pipeline_defaults": {
+    "detector_conf_threshold": 0.2,
+    "detector_iou_threshold": 0.45,
+    "detector_max_det": 20,
+    "detector_bill_min_conf": 0.2,
+    "detector_coin_min_conf": 0.35,
+    "detector_min_box_side_px": 6.0,
+    "detector_min_box_area_ratio": 0.0015,
+    "detector_max_box_area_ratio": 0.92,
+    "detector_coin_min_aspect": 0.35,
+    "detector_coin_max_aspect": 2.85,
+    "detector_duplicate_iou": 0.88,
+    "detector_duplicate_cross_class_iou": 0.96,
+    "pipeline_coin_route_min_conf": 0.35,
+    "pipeline_giant_coin_area_ratio": 0.65,
+    "pipeline_max_topk_targets": 5,
+    "spoof_guard_threshold": 0.8,
+    "spoof_guard_block_on_detect": true
+  },
+  "models": {
+    "detector": {
+      "file": "detector-android.mobile.onnx",
+      "checkpoint": "phase2-amt-det-20260301-130911-008-900e563f__best.pt",
+      "class_names": [
+        "CAD_5",
+        "CAD_10",
+        "CAD_20",
+        "CAD_50",
+        "CAD_100",
+        "COIN"
+      ],
+      "input_name": "image",
+      "output_name": "nms_output_with_scaled_boxes_and_keypoints",
+      "image_size": 640,
+      "quantized": true,
+      "size_bytes": 2879494
+    },
+    "bill_reader": {
+      "file": "bill-reader-android.mobile.onnx",
+      "checkpoint": "p2amt-bill-260301130911-003-7404d154__model.pt",
+      "classes": [
+        "CAD_10",
+        "CAD_100",
+        "CAD_20",
+        "CAD_5",
+        "CAD_50"
+      ],
+      "image_size": 256,
+      "backbone": "resnet18",
+      "normalize_imagenet": true,
+      "input_name": "image",
+      "output_name": "probabilities",
+      "quantized": true,
+      "size_bytes": 11236864
+    },
+    "coin_classifier": {
+      "file": "coin-classifier-android.mobile.onnx",
+      "checkpoint": "p2amt-coin-260301215339-001-819c769d__model.pt",
+      "classes": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "image_size": 256,
+      "backbone": "resnet18",
+      "normalize_imagenet": true,
+      "input_name": "image",
+      "output_name": "probabilities",
+      "quantized": true,
+      "size_bytes": 11237392
+    },
+    "spoof_guard": {
+      "file": "spoof-guard-android.mobile.onnx",
+      "checkpoint": "screen-guard-detector-20260316-064336__model.pt",
+      "class_names": [
+        "screen"
+      ],
+      "input_name": "image",
+      "output_name": "nms_output_with_scaled_boxes_and_keypoints",
+      "image_size": 640,
+      "quantized": true,
+      "size_bytes": 3022430
+    }
+  }
+}

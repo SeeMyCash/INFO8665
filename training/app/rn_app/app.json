@@ -1,19 +1,35 @@
 {
   "expo": {
-    "name": "SMC Inference",
+    "name": "SeeMyCash",
     "slug": "smc-inference",
     "version": "0.1.0",
-    "platforms": ["ios", "android", "web"],
+    "icon": "./assets/app-icon.png",
+    "scheme": "see-my-cash",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "orientation": "portrait",
     "jsEngine": "hermes",
     "plugins": [
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow SMC Inference to access your camera for live money detection."
+          "cameraPermission": "Allow SeeMyCash to access your camera for money detection."
         }
-      ]
+      ],
+      "expo-asset"
     ],
+    "android": {
+      "package": "com.femil.seemycash",
+      "versionCode": 1,
+      "usesCleartextTraffic": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#023c69"
+      }
+    },
     "web": {
       "bundler": "metro"
     }

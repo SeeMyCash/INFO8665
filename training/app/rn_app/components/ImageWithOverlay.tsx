@@ -3,10 +3,11 @@
  *
  * On web, it appends an HTML5 canvas over the <img> element and draws detection
  * boxes scaled from the image's native resolution to the displayed size.
- * On native platforms it simply renders a plain <Image>.
+ * On native platforms it renders a view-based overlay using the same detection data.
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Image, ImageStyle, Platform, StyleProp, View } from 'react-native';
+import DetectionOverlay from './DetectionOverlay';
 
 export type Detection = {
     class_name?: string;
@@ -38,6 +39,8 @@ type Props = {
 
 export default function ImageWithOverlay({ uri, detections, style, resizeMode = 'contain' }: Props) {
     const wrapRef = useRef<any>(null);
+    const [layoutSize, setLayoutSize] = useState({ width: 0, height: 0 });
+    const [sourceSize, setSourceSize] = useState({ width: 0, height: 0 });
 
     useEffect(() => {
         if (Platform.OS !== 'web') return;
@@ -137,11 +140,49 @@ export default function ImageWithOverlay({ uri, detections, style, resizeMode = 
         };
     }, [uri, detections, resizeMode]);
 
+    useEffect(() => {
+        Image.getSize(
+            uri,
+            (width, height) => setSourceSize({ width, height }),
+            () => setSourceSize({ width: 0, height: 0 }),
+        );
+    }, [uri]);
+
     // Ensure the container has position:relative so the absolute canvas positions correctly
     // On web, View === <div>, and we set position via style.
     return (
-        <View ref={wrapRef} style={{ position: 'relative' as any }}>
-            <Image source={{ uri }} style={style} resizeMode={resizeMode} />
+        <View
+            ref={wrapRef}
+            style={{ position: 'relative' as any }}
+            onLayout={(event) => {
+                const { width, height } = event.nativeEvent.layout;
+                setLayoutSize((prev) =>
+                    prev.width === width && prev.height === height ? prev : { width, height }
+                );
+            }}
+        >
+            <Image
+                source={{ uri }}
+                style={style}
+                resizeMode={resizeMode}
+                onLoad={(event) => {
+                    const width = Number(event.nativeEvent.source?.width || 0);
+                    const height = Number(event.nativeEvent.source?.height || 0);
+                    if (width > 0 && height > 0) {
+                        setSourceSize({ width, height });
+                    }
+                }}
+            />
+            {Platform.OS !== 'web' && (
+                <DetectionOverlay
+                    detections={detections}
+                    width={layoutSize.width}
+                    height={layoutSize.height}
+                    sourceWidth={sourceSize.width}
+                    sourceHeight={sourceSize.height}
+                    resizeMode={resizeMode}
+                />
+            )}
         </View>
     );
 }

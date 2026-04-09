@@ -10,6 +10,8 @@ import AnimatedCard from '../components/AnimatedCard';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../contexts/HistoryContext';
+import { getOfflinePipelineStatus } from '../services/offlinePipeline';
+import { resolveReachableApiBase } from '../services/serverApi';
 import { spacing, radii } from '../theme';
 
 type RootStackParamList = {
@@ -24,8 +26,9 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Landing'>;
 
 export default function LandingScreen({ navigation }: Props) {
     const { tc, isDark, typography: typ } = useThemeColors();
-    const { settings } = useSettings();
+    const { settings, update } = useSettings();
     const { entries } = useHistory();
+    const isOfflineMode = settings.inferenceMode === 'offline';
     const [health, setHealth] = useState<'online' | 'offline' | 'busy'>('busy');
     const [healthDetail, setHealthDetail] = useState('Checking…');
 
@@ -72,29 +75,40 @@ export default function LandingScreen({ navigation }: Props) {
 
     useEffect(() => {
         checkHealth();
-    }, [settings.apiBaseUrl]);
+    }, [settings.apiBaseUrl, settings.inferenceMode]);
 
     async function checkHealth() {
         setHealth('busy');
-        setHealthDetail('Pinging backend…');
-        try {
-            const res = await fetch(
-                settings.apiBaseUrl.replace(/\/$/, '') + '/api/health',
-                { signal: AbortSignal.timeout(5000) }
-            );
-            if (res.ok) {
-                const data = await res.json();
-                const pipeline = data?.pipeline || {};
-                const ready = pipeline.detector && pipeline.bill_reader && pipeline.coin_classifier;
-                setHealth('online');
-                setHealthDetail(ready ? 'Pipeline ready' : 'Connected (pipeline loading)');
-            } else {
+        if (isOfflineMode) {
+            setHealthDetail('Loading bundled models...');
+            try {
+                const status = await getOfflinePipelineStatus();
+                if (status.ready) {
+                    setHealth('online');
+                    setHealthDetail('Bundled models ready');
+                } else {
+                    setHealth('offline');
+                    setHealthDetail(status.error || 'On-device runtime unavailable');
+                }
+            } catch (error) {
                 setHealth('offline');
-                setHealthDetail(`HTTP ${res.status}`);
+                setHealthDetail(error instanceof Error ? error.message : 'On-device runtime unavailable');
             }
-        } catch {
+            return;
+        }
+        setHealthDetail('Pinging backend…');
+        const probe = await resolveReachableApiBase(settings.apiBaseUrl, 5000);
+        if (probe.ok) {
+            if (probe.base !== settings.apiBaseUrl) {
+                update({ apiBaseUrl: probe.base });
+            }
+            const pipeline = probe.data?.pipeline || {};
+            const ready = pipeline.detector && pipeline.bill_reader && pipeline.coin_classifier;
+            setHealth('online');
+            setHealthDetail(ready ? 'Pipeline ready' : 'Connected (pipeline loading)');
+        } else {
             setHealth('offline');
-            setHealthDetail('Cannot reach backend');
+            setHealthDetail(probe.error || 'Cannot reach backend');
         }
     }
 
@@ -111,18 +125,20 @@ export default function LandingScreen({ navigation }: Props) {
 
             {/* Top-right nav icons */}
             <View style={styles.topNav}>
-                <Pressable
-                    onPress={() => navigation.navigate('Diagnostics')}
-                    style={({ pressed }) => [
-                        styles.navIcon,
-                        { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' },
-                        pressed && { opacity: 0.7 },
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Open diagnostics"
-                >
-                    <Ionicons name="analytics-outline" size={22} color={tc.textSecondary} />
-                </Pressable>
+                {settings.debugModeEnabled && (
+                    <Pressable
+                        onPress={() => navigation.navigate('Diagnostics')}
+                        style={({ pressed }) => [
+                            styles.navIcon,
+                            { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' },
+                            pressed && { opacity: 0.7 },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open diagnostics"
+                    >
+                        <Ionicons name="analytics-outline" size={22} color={tc.textSecondary} />
+                    </Pressable>
+                )}
             </View>
 
             <View style={styles.content}>
@@ -147,7 +163,7 @@ export default function LandingScreen({ navigation }: Props) {
                 {/* Health badge */}
                 <AnimatedCard delay={300}>
                     <View style={styles.healthWrap}>
-                        <StatusBadge status={health} label="Backend" detail={healthDetail} />
+                        <StatusBadge status={health} label={isOfflineMode ? 'On-device runtime' : 'Backend'} detail={healthDetail} />
                     </View>
                 </AnimatedCard>
 

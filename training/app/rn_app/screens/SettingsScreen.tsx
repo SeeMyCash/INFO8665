@@ -7,6 +7,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import GradientButton from '../components/GradientButton';
 import AnimatedCard from '../components/AnimatedCard';
 import { useToast } from '../components/Toast';
+import { describeApiBaseUrl, HOSTED_API_BASE_URL, isLikelyLocalOnlyApiBaseUrl } from '../services/serverApi';
 import { spacing, radii } from '../theme';
 
 function Section({ title, icon, tc, typ }: { title: string; icon: any; tc: any; typ: any; children?: React.ReactNode } & { children?: React.ReactNode }) {
@@ -150,15 +151,24 @@ export default function SettingsScreen() {
                 ))}
             </>, 0)}
 
-            {/* API */}
-            {renderSection('API Connection', 'server-outline', <>
-                {renderRow('Base URL', 'FastAPI backend address', (
+            {/* Inference */}
+            {renderSection('Inference', 'server-outline', <>
+                {renderRow('Mode', Platform.OS === 'android'
+                    ? 'Choose between on-device inference and the FastAPI backend'
+                    : 'Offline inference is available in the Android build',
+                    segmentControl(
+                        [{ label: 'Offline', value: 'offline' }, { label: 'Server', value: 'server' }],
+                        settings.inferenceMode,
+                        (v) => update({ inferenceMode: v as any })
+                    )
+                )}
+                {settings.inferenceMode === 'server' && renderRow('Base URL', 'FastAPI backend address', (
                     <TextInput
                         value={settings.apiBaseUrl}
                         onChangeText={(v) => update({ apiBaseUrl: v })}
                         autoCapitalize="none"
                         autoCorrect={false}
-                        placeholder="http://localhost:8080"
+                        placeholder={HOSTED_API_BASE_URL}
                         placeholderTextColor={tc.textMuted}
                         style={[styles.textInput, typ.mono, {
                             backgroundColor: tc.surfaceElevated,
@@ -167,6 +177,39 @@ export default function SettingsScreen() {
                         }]}
                     />
                 ))}
+                {settings.inferenceMode === 'server' && (
+                    <>
+                        <Text style={[typ.caption, { color: tc.textMuted, marginTop: spacing.sm }]}>
+                            {describeApiBaseUrl(settings.apiBaseUrl)}
+                        </Text>
+                        {isLikelyLocalOnlyApiBaseUrl(settings.apiBaseUrl) && (
+                            <Text style={[typ.caption, { color: tc.warning, marginTop: spacing.xs }]}>
+                                Use the hosted API, a LAN IP, or ADB reverse. `localhost` on the phone does not reach your laptop or cloud backend.
+                            </Text>
+                        )}
+                        <View style={[styles.buttonRow, { marginTop: spacing.sm }]}>
+                            <GradientButton
+                                title="Use Hosted API"
+                                onPress={() => update({ apiBaseUrl: HOSTED_API_BASE_URL })}
+                                variant="outline"
+                                size="sm"
+                                icon={<Ionicons name="cloud-done-outline" size={16} color={tc.primary} />}
+                            />
+                            <GradientButton
+                                title="Reset URL"
+                                onPress={() => update({ apiBaseUrl: DEFAULT_SETTINGS.apiBaseUrl })}
+                                variant="outline"
+                                size="sm"
+                                icon={<Ionicons name="refresh-outline" size={16} color={tc.primary} />}
+                            />
+                        </View>
+                    </>
+                )}
+                {settings.inferenceMode === 'offline' && (
+                    <Text style={[typ.caption, { color: tc.textMuted, marginTop: spacing.sm }]}>
+                        Offline mode keeps camera capture and model inference on the phone with no runtime cloud API calls.
+                    </Text>
+                )}
             </>, 60)}
 
             {/* Detection */}
@@ -273,12 +316,12 @@ export default function SettingsScreen() {
 
             {/* Debug */}
             {renderSection('Developer', 'code-slash-outline', <>
-                {renderRow('Show Debug Panel', 'Display raw JSON in inference view', (
+                {renderRow('Enable Debug Mode', 'Show diagnostics, backend route controls, and raw inference output', (
                     <Switch
-                        value={settings.showDebugPanel}
-                        onValueChange={(v) => update({ showDebugPanel: v })}
-                        trackColor={switchTrack(settings.showDebugPanel)}
-                        thumbColor={switchThumb(settings.showDebugPanel)}
+                        value={settings.debugModeEnabled}
+                        onValueChange={(v) => update({ debugModeEnabled: v })}
+                        trackColor={switchTrack(settings.debugModeEnabled)}
+                        thumbColor={switchThumb(settings.debugModeEnabled)}
                     />
                 ))}
             </>, 360)}
@@ -350,6 +393,11 @@ const styles = StyleSheet.create({
     segmentBtn: {
         paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
         borderRadius: radii.sm - 2,
+    },
+    buttonRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: spacing.sm,
     },
     resetWrap: { alignItems: 'center' },
     storageBadge: {

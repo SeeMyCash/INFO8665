@@ -1,0 +1,495 @@
+<svg width="420mm" height="297mm" viewBox="0 0 4200 2970" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="220" y1="180" x2="3900" y2="2840" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A" />
+      <stop offset="0.48" stop-color="#111827" />
+      <stop offset="1" stop-color="#1E1B4B" />
+    </linearGradient>
+    <radialGradient id="glowPurple" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1000 660) rotate(35) scale(1180 900)">
+      <stop offset="0" stop-color="#8B5CF6" stop-opacity="0.35" />
+      <stop offset="1" stop-color="#8B5CF6" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowGreen" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(3320 2220) rotate(20) scale(1180 840)">
+      <stop offset="0" stop-color="#34D399" stop-opacity="0.24" />
+      <stop offset="1" stop-color="#34D399" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="glowAmber" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(3140 700) rotate(10) scale(900 620)">
+      <stop offset="0" stop-color="#FBBF24" stop-opacity="0.24" />
+      <stop offset="1" stop-color="#FBBF24" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="panelStroke" x1="0" y1="0" x2="4200" y2="2970" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A78BFA" stop-opacity="0.72" />
+      <stop offset="0.5" stop-color="#60A5FA" stop-opacity="0.55" />
+      <stop offset="1" stop-color="#34D399" stop-opacity="0.6" />
+    </linearGradient>
+    <linearGradient id="panelFill" x1="250" y1="260" x2="3950" y2="2720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#111827" stop-opacity="0.92" />
+      <stop offset="1" stop-color="#0F172A" stop-opacity="0.72" />
+    </linearGradient>
+    <linearGradient id="titleBar" x1="220" y1="210" x2="3980" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7C3AED" />
+      <stop offset="0.45" stop-color="#0EA5E9" />
+      <stop offset="1" stop-color="#10B981" />
+    </linearGradient>
+    <linearGradient id="cardPurple" x1="0" y1="0" x2="560" y2="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1E1B4B" />
+      <stop offset="1" stop-color="#312E81" />
+    </linearGradient>
+    <linearGradient id="cardBlue" x1="0" y1="0" x2="620" y2="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A" />
+      <stop offset="1" stop-color="#0C4A6E" />
+    </linearGradient>
+    <linearGradient id="cardGreen" x1="0" y1="0" x2="640" y2="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#052E2B" />
+      <stop offset="1" stop-color="#064E3B" />
+    </linearGradient>
+    <linearGradient id="cardAmber" x1="0" y1="0" x2="560" y2="460" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#451A03" />
+      <stop offset="1" stop-color="#78350F" />
+    </linearGradient>
+    <filter id="softShadow" x="-120" y="-120" width="4440" height="3210" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="26" stdDeviation="38" flood-color="#020617" flood-opacity="0.55" />
+    </filter>
+    <pattern id="grid" x="0" y="0" width="120" height="120" patternUnits="userSpaceOnUse">
+      <path d="M120 0H0V120" stroke="#94A3B8" stroke-opacity="0.08" stroke-width="2" />
+    </pattern>
+    <marker id="arrowPurple" viewBox="0 0 16 16" refX="14" refY="8" markerWidth="16" markerHeight="16" orient="auto">
+      <path d="M2 2L14 8L2 14V2Z" fill="#A78BFA" />
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 16 16" refX="14" refY="8" markerWidth="16" markerHeight="16" orient="auto">
+      <path d="M2 2L14 8L2 14V2Z" fill="#34D399" />
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 16 16" refX="14" refY="8" markerWidth="16" markerHeight="16" orient="auto">
+      <path d="M2 2L14 8L2 14V2Z" fill="#FBBF24" />
+    </marker>
+    <style>
+      .title { font: 800 120px 'Segoe UI', 'Trebuchet MS', sans-serif; fill: #F8FAFC; letter-spacing: 4px; }
+      .subtitle { font: 500 34px 'Segoe UI', 'Trebuchet MS', sans-serif; fill: #CBD5E1; letter-spacing: 0.7px; }
+      .section-title { font: 800 50px 'Segoe UI', 'Trebuchet MS', sans-serif; fill: #F8FAFC; letter-spacing: 0.8px; }
+      .section-kicker { font: 700 26px 'Consolas', 'Courier New', monospace; fill: #93C5FD; letter-spacing: 2.2px; }
+      .card-title { font: 800 30px 'Segoe UI', 'Trebuchet MS', sans-serif; fill: #F8FAFC; }
+      .card-body { font: 500 19px 'Segoe UI', 'Trebuchet MS', sans-serif; fill: #D8E3F2; line-height: 1.4; }
+      .chip { font: 700 18px 'Consolas', 'Courier New', monospace; fill: #E2E8F0; letter-spacing: 0.8px; }
+      .tiny { font: 600 14px 'Consolas', 'Courier New', monospace; fill: #C7D2FE; }
+      .small { font: 500 16px 'Segoe UI', 'Trebuchet MS', sans-serif; fill: #E2E8F0; }
+      .label { font: 700 21px 'Segoe UI', 'Trebuchet MS', sans-serif; fill: #F8FAFC; letter-spacing: 0.6px; }
+      .muted { fill: #94A3B8; }
+      .path-label { font: 700 15px 'Consolas', 'Courier New', monospace; fill: #F8FAFC; letter-spacing: 0.8px; }
+      .mono-dark { font: 700 15px 'Consolas', 'Courier New', monospace; fill: #0F172A; letter-spacing: 0.7px; }
+      .outline { fill: none; stroke: url(#panelStroke); stroke-width: 4; stroke-opacity: 0.8; }
+      .link { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="4200" height="2970" fill="url(#bg)" />
+  <rect width="4200" height="2970" fill="url(#grid)" opacity="0.55" />
+  <ellipse cx="980" cy="650" rx="1050" ry="780" fill="url(#glowPurple)" />
+  <ellipse cx="3240" cy="750" rx="840" ry="560" fill="url(#glowAmber)" />
+  <ellipse cx="3330" cy="2220" rx="1100" ry="780" fill="url(#glowGreen)" />
+
+  <g filter="url(#softShadow)">
+    <rect x="120" y="120" width="3960" height="2730" rx="50" fill="url(#panelFill)" stroke="url(#panelStroke)" stroke-width="4" />
+    <rect x="120" y="120" width="3960" height="16" rx="8" fill="url(#titleBar)" />
+  </g>
+
+  <text x="220" y="270" class="title">SEE MY CASH</text>
+  <text x="225" y="330" class="subtitle">Project architecture poster | colourful A3 view of the current FastAPI + MLOps + Docker deployment</text>
+  <text x="225" y="374" class="subtitle">Money detection, bill classification, coin classification, and spoof-guard protection in one connected system</text>
+
+  <g transform="translate(3040 182)">
+    <rect x="0" y="0" width="130" height="44" rx="22" fill="#7C3AED" />
+    <rect x="150" y="0" width="146" height="44" rx="22" fill="#0EA5E9" />
+    <rect x="316" y="0" width="164" height="44" rx="22" fill="#10B981" />
+    <rect x="500" y="0" width="156" height="44" rx="22" fill="#F59E0B" />
+    <rect x="676" y="0" width="176" height="44" rx="22" fill="#EF4444" />
+    <text x="28" y="29" class="mono-dark">FASTAPI</text>
+    <text x="182" y="29" class="mono-dark">POSTGRES</text>
+    <text x="356" y="29" class="mono-dark">MLFLOW</text>
+    <text x="540" y="29" class="mono-dark">DOCKER</text>
+    <text x="724" y="29" class="mono-dark">AWS READY</text>
+  </g>
+
+  <g transform="translate(200 500)">
+    <rect x="0" y="0" width="1180" height="2060" rx="38" fill="#0B1120" fill-opacity="0.58" stroke="#A78BFA" stroke-opacity="0.55" stroke-width="3" />
+    <text x="40" y="70" class="section-kicker">LEFT LANE / BUILD + DATA FACTORY</text>
+    <text x="40" y="136" class="section-title">Offline ML pipeline</text>
+    <text x="40" y="184" class="card-body">
+      <tspan x="40" dy="0">The repo turns raw data into trained artifacts for four ML use cases.</tspan>
+      <tspan x="40" dy="26">Each use case follows the course-aligned service chain.</tspan>
+    </text>
+    <g transform="translate(40 248)">
+      <rect x="0" y="0" width="250" height="150" rx="26" fill="url(#cardPurple)" stroke="#C4B5FD" stroke-opacity="0.6" />
+      <rect x="276" y="0" width="250" height="150" rx="26" fill="url(#cardBlue)" stroke="#93C5FD" stroke-opacity="0.6" />
+      <rect x="552" y="0" width="250" height="150" rx="26" fill="url(#cardGreen)" stroke="#6EE7B7" stroke-opacity="0.62" />
+      <rect x="828" y="0" width="272" height="150" rx="26" fill="url(#cardAmber)" stroke="#FCD34D" stroke-opacity="0.62" />
+      <text x="22" y="42" class="chip">DATA INPUTS</text>
+      <text x="22" y="82" class="card-title">Roboflow ingest</text>
+      <text x="22" y="116" class="small">banknotes, coins, user images</text>
+      <text x="298" y="42" class="chip">LOCAL WORKSPACE</text>
+      <text x="298" y="82" class="card-title">Clean datasets</text>
+      <text x="298" y="116" class="small">YOLO labels, cutouts, negatives</text>
+      <text x="574" y="42" class="chip">AUGMENTATION</text>
+      <text x="574" y="82" class="card-title">COCO realism</text>
+      <text x="574" y="116" class="small">screen spoof data and coin domains</text>
+      <text x="850" y="42" class="chip">OPTIONAL CLOUD</text>
+      <text x="850" y="82" class="card-title">AWS bridge</text>
+      <text x="850" y="116" class="small">artifact sync and imported runs</text>
+    </g>
+
+    <g transform="translate(40 452)">
+      <text x="0" y="0" class="label">Service lifecycle used across each ML use case</text>
+      <rect x="0" y="36" width="248" height="76" rx="20" fill="#4C1D95" stroke="#C4B5FD" stroke-opacity="0.65" />
+      <rect x="270" y="36" width="248" height="76" rx="20" fill="#0F3B68" stroke="#93C5FD" stroke-opacity="0.65" />
+      <rect x="540" y="36" width="248" height="76" rx="20" fill="#084C61" stroke="#67E8F9" stroke-opacity="0.65" />
+      <rect x="810" y="36" width="250" height="76" rx="20" fill="#065F46" stroke="#6EE7B7" stroke-opacity="0.65" />
+      <rect x="0" y="132" width="248" height="76" rx="20" fill="#713F12" stroke="#FCD34D" stroke-opacity="0.65" />
+      <rect x="270" y="132" width="248" height="76" rx="20" fill="#7C2D12" stroke="#FDBA74" stroke-opacity="0.65" />
+      <rect x="540" y="132" width="248" height="76" rx="20" fill="#9F1239" stroke="#FDA4AF" stroke-opacity="0.65" />
+      <rect x="810" y="132" width="250" height="76" rx="20" fill="#14532D" stroke="#86EFAC" stroke-opacity="0.65" />
+      <text x="28" y="83" class="chip">1 INGESTION</text>
+      <text x="298" y="83" class="chip">2 EDA / PROFILING</text>
+      <text x="568" y="83" class="chip">3 PREPROCESS</text>
+      <text x="838" y="83" class="chip">4 TRAINING</text>
+      <text x="28" y="179" class="chip">5 VALIDATION</text>
+      <text x="298" y="179" class="chip">6 SERVING</text>
+      <text x="568" y="179" class="chip">7 INTEGRATION</text>
+      <text x="838" y="179" class="chip">8 MONITORING</text>
+      <text x="0" y="254" class="tiny">Scripts in the repo: 01, 02, 03, 04, 06, 10, 20, 21, 22, 23, 24, 25, 28, 29, 30, 31, 32, 40, 41</text>
+      <text x="0" y="286" class="tiny">Shared helpers: scripts/_tracking.py | scripts/_runtime.py</text>
+    </g>
+
+    <g transform="translate(40 806)">
+      <text x="0" y="0" class="label">Model families trained in the codebase</text>
+      <rect x="0" y="34" width="520" height="286" rx="28" fill="url(#cardPurple)" stroke="#C4B5FD" stroke-opacity="0.62" />
+      <rect x="560" y="34" width="520" height="286" rx="28" fill="url(#cardBlue)" stroke="#93C5FD" stroke-opacity="0.62" />
+      <rect x="0" y="350" width="520" height="286" rx="28" fill="url(#cardGreen)" stroke="#6EE7B7" stroke-opacity="0.62" />
+      <rect x="560" y="350" width="520" height="286" rx="28" fill="url(#cardAmber)" stroke="#FCD34D" stroke-opacity="0.62" />
+
+      <text x="28" y="84" class="chip">USE CASE 01</text>
+      <text x="28" y="132" class="card-title">Money detection</text>
+      <text x="28" y="176" class="card-body">
+        <tspan x="28" dy="0">YOLO detector finds bills and coins in a scene</tspan>
+        <tspan x="28" dy="26">before routing crops downstream.</tspan>
+      </text>
+      <text x="28" y="222" class="tiny">train: 10_train_detector.py</text>
+      <text x="28" y="252" class="tiny">eval: training/eval_detector.py</text>
+
+      <text x="588" y="84" class="chip">USE CASE 02</text>
+      <text x="588" y="132" class="card-title">Bill classification</text>
+      <text x="588" y="176" class="card-body">
+        <tspan x="588" dy="0">ImageFolder-style cutouts feed a denomination</tspan>
+        <tspan x="588" dy="26">classifier for notes after detection.</tspan>
+      </text>
+      <text x="588" y="222" class="tiny">build: 04_make_bill_cutouts.py</text>
+      <text x="588" y="252" class="tiny">train/eval: 24 + 25</text>
+
+      <text x="28" y="400" class="chip">USE CASE 03</text>
+      <text x="28" y="448" class="card-title">Coin classification</text>
+      <text x="28" y="492" class="card-body">
+        <tspan x="28" dy="0">Domain-specific coin crops and realism</tspan>
+        <tspan x="28" dy="26">augmentation support the coin recognizer.</tspan>
+      </text>
+      <text x="28" y="538" class="tiny">prep: 20_build_coin_crops_domains.py</text>
+      <text x="28" y="568" class="tiny">train/eval: 22 + 23</text>
+
+      <text x="588" y="400" class="chip">USE CASE 04</text>
+      <text x="588" y="448" class="card-title">Spoof guard</text>
+      <text x="588" y="492" class="card-body">
+        <tspan x="588" dy="0">A separate model warns about replay or screen</tspan>
+        <tspan x="588" dy="26">attacks before the main recognition path runs.</tspan>
+      </text>
+      <text x="588" y="538" class="tiny">prep: 30 + 32</text>
+      <text x="588" y="568" class="tiny">train/eval: 28 + 29</text>
+    </g>
+
+    <g transform="translate(40 1500)">
+      <rect x="0" y="0" width="1100" height="470" rx="28" fill="#0F172A" fill-opacity="0.78" stroke="#A78BFA" stroke-opacity="0.45" />
+      <text x="28" y="50" class="chip">OUTPUT ARTIFACTS</text>
+      <text x="28" y="98" class="card-title">What leaves the build lane</text>
+      <text x="28" y="146" class="card-body">
+        <tspan x="28" dy="0">Trained checkpoints, exported formats, evaluation reports, and</tspan>
+        <tspan x="28" dy="26">MLflow runs become deployable assets for the runtime API.</tspan>
+      </text>
+      <text x="28" y="214" class="tiny">weights | onnx | torchscript | metrics | confusion tables</text>
+      <text x="28" y="244" class="tiny">export + quantize: 11 export | 26 classifier | 27 detector</text>
+      <text x="28" y="272" class="tiny">cloud + lineage: 40 champions | 41 SageMaker -&gt; MLflow</text>
+      <rect x="28" y="322" width="198" height="88" rx="22" fill="#312E81" />
+      <rect x="244" y="322" width="214" height="88" rx="22" fill="#0C4A6E" />
+      <rect x="476" y="322" width="214" height="88" rx="22" fill="#064E3B" />
+      <rect x="708" y="322" width="364" height="88" rx="22" fill="#7C2D12" />
+      <text x="58" y="376" class="chip">MODELS/</text>
+      <text x="278" y="376" class="chip">OUTPUTS/</text>
+      <text x="510" y="376" class="chip">MLFLOW</text>
+      <text x="740" y="376" class="chip">S3-READY DEPLOY PACKS</text>
+    </g>
+  </g>
+
+  <g transform="translate(1480 500)">
+    <rect x="0" y="0" width="1240" height="2060" rx="38" fill="#0B1120" fill-opacity="0.58" stroke="#60A5FA" stroke-opacity="0.6" stroke-width="3" />
+    <text x="40" y="70" class="section-kicker">CENTER LANE / CONTROL PLANE</text>
+    <text x="40" y="136" class="section-title">API, secrets, tracking</text>
+    <text x="40" y="184" class="card-body">
+      <tspan x="40" dy="0">FastAPI sits at the center, exposing product routes, ML service</tspan>
+      <tspan x="40" dy="26">contracts, storage diagnostics, model sync, and metrics.</tspan>
+    </text>
+    <g transform="translate(40 246)">
+      <rect x="0" y="0" width="1160" height="210" rx="28" fill="#111827" fill-opacity="0.82" stroke="#60A5FA" stroke-opacity="0.55" />
+      <text x="28" y="46" class="chip">API-EXECUTABLE SERVICE CONTRACTS</text>
+      <text x="28" y="98" class="card-title">Course-aligned MLOps catalog</text>
+      <text x="28" y="146" class="card-body">
+        <tspan x="28" dy="0">The API exposes lifecycle contracts for each ML use case through</tspan>
+        <tspan x="28" dy="26">/api/mlops/use-cases and per-stage contract routes.</tspan>
+      </text>
+      <text x="28" y="192" class="tiny">Money detection | bill classification | coin classification | spoof guard</text>
+    </g>
+
+    <g transform="translate(40 488)">
+      <rect x="0" y="0" width="1160" height="620" rx="34" fill="url(#cardBlue)" stroke="#93C5FD" stroke-opacity="0.68" />
+      <text x="28" y="48" class="chip">APPLICATION CORE</text>
+      <text x="28" y="104" class="card-title">FastAPI entrypoint and routed services</text>
+      <text x="28" y="156" class="card-body">
+        <tspan x="28" dy="0">training/app/main.py mounts static assets, publishes /metrics,</tspan>
+        <tspan x="28" dy="26">initializes storage, and loads the multi-model pipeline.</tspan>
+      </text>
+
+      <rect x="28" y="206" width="328" height="112" rx="24" fill="#1D4ED8" fill-opacity="0.72" />
+      <rect x="382" y="206" width="356" height="112" rx="24" fill="#7C3AED" fill-opacity="0.72" />
+      <rect x="764" y="206" width="368" height="112" rx="24" fill="#059669" fill-opacity="0.72" />
+      <text x="52" y="252" class="chip">/api/pipeline/*</text>
+      <text x="52" y="286" class="small">status, stats, refresh, infer</text>
+      <text x="406" y="252" class="chip">/api/storage/*</text>
+      <text x="406" y="286" class="small">status and inference history</text>
+      <text x="788" y="252" class="chip">/api/mlops/*</text>
+      <text x="788" y="286" class="small">use cases and service contracts</text>
+
+      <rect x="28" y="350" width="328" height="112" rx="24" fill="#0F766E" fill-opacity="0.75" />
+      <rect x="382" y="350" width="356" height="112" rx="24" fill="#9333EA" fill-opacity="0.75" />
+      <rect x="764" y="350" width="368" height="112" rx="24" fill="#B45309" fill-opacity="0.75" />
+      <text x="52" y="396" class="chip">/api/models</text>
+      <text x="52" y="430" class="small">list, select, sync from S3</text>
+      <text x="406" y="396" class="chip">/api/health</text>
+      <text x="406" y="430" class="small">config, status, model readiness</text>
+      <text x="788" y="396" class="chip">/metrics</text>
+      <text x="788" y="430" class="small">Prometheus-exported telemetry</text>
+
+      <path d="M182 514C268 540 344 540 436 514" class="link" stroke="#93C5FD" stroke-width="8" marker-end="url(#arrowPurple)" />
+      <path d="M596 514C680 540 760 540 860 514" class="link" stroke="#6EE7B7" stroke-width="8" marker-end="url(#arrowGreen)" />
+      <text x="28" y="584" class="tiny">Automatic chain: spoof guard -&gt; detector -&gt; target routing -&gt; bill reader or coin classifier</text>
+    </g>
+
+    <g transform="translate(40 1148)">
+      <rect x="0" y="0" width="560" height="362" rx="28" fill="url(#cardPurple)" stroke="#C4B5FD" stroke-opacity="0.6" />
+      <rect x="600" y="0" width="560" height="362" rx="28" fill="url(#cardGreen)" stroke="#6EE7B7" stroke-opacity="0.62" />
+      <text x="28" y="44" class="chip">SECRETS MANAGEMENT</text>
+      <text x="28" y="94" class="card-title">
+        <tspan x="28" dy="0">Config is resolved</tspan>
+        <tspan x="28" dy="34">without hard-coding</tspan>
+      </text>
+      <text x="28" y="172" class="small">
+        <tspan x="28" dy="0">config.py and secrets.py load .env, direct env vars,</tspan>
+        <tspan x="28" dy="22">*_FILE overrides, and /run/secrets mounts.</tspan>
+      </text>
+      <text x="28" y="204" class="tiny">DB_USERNAME | DB_PASSWORD | DATABASE_URL</text>
+      <text x="28" y="236" class="tiny">DB_HOSTNAME | DB_PORT | DB_NAME | DB_SSLMODE</text>
+      <text x="28" y="268" class="tiny">AWS_REGION | ARTIFACTS_BUCKET | GRAFANA_ADMIN_PASSWORD</text>
+      <text x="628" y="44" class="chip">ARTIFACT ROUTING</text>
+      <text x="628" y="94" class="card-title">
+        <tspan x="628" dy="0">Model sync and</tspan>
+        <tspan x="628" dy="34">deploy defaults</tspan>
+      </text>
+      <text x="628" y="172" class="small">
+        <tspan x="628" dy="0">The API can refresh models from S3, import</tspan>
+        <tspan x="628" dy="22">SageMaker history into MLflow, and choose artifacts.</tspan>
+      </text>
+      <text x="628" y="204" class="tiny">services/s3_sync.py | models/ | outputs/mlflow/</text>
+      <text x="628" y="236" class="tiny">champion download (40) | SageMaker -&gt; MLflow import (41)</text>
+    </g>
+
+    <g transform="translate(40 1548)">
+      <rect x="0" y="0" width="360" height="432" rx="28" fill="#111827" fill-opacity="0.82" stroke="#93C5FD" stroke-opacity="0.52" />
+      <rect x="400" y="0" width="360" height="432" rx="28" fill="#111827" fill-opacity="0.82" stroke="#6EE7B7" stroke-opacity="0.52" />
+      <rect x="800" y="0" width="360" height="432" rx="28" fill="#111827" fill-opacity="0.82" stroke="#FCD34D" stroke-opacity="0.52" />
+
+      <text x="28" y="44" class="chip">STORAGE MODES</text>
+      <text x="28" y="90" class="card-title">
+        <tspan x="28" dy="0">Postgres or</tspan>
+        <tspan x="28" dy="34">local JSONL</tspan>
+      </text>
+      <text x="28" y="164" class="small">
+        <tspan x="28" dy="0">History can persist to the database</tspan>
+        <tspan x="28" dy="22">or fall back to local file storage.</tspan>
+      </text>
+      <text x="28" y="258" class="tiny">/api/storage/status</text>
+      <text x="28" y="284" class="tiny">/api/storage/history</text>
+
+      <text x="428" y="44" class="chip">EXPERIMENT TRACKING</text>
+      <text x="428" y="90" class="card-title">
+        <tspan x="428" dy="0">MLflow records</tspan>
+        <tspan x="428" dy="34">training lineage</tspan>
+      </text>
+      <text x="428" y="164" class="small">
+        <tspan x="428" dy="0">Training and eval scripts log metrics,</tspan>
+        <tspan x="428" dy="22">artifacts, and run metadata locally.</tspan>
+      </text>
+      <text x="428" y="258" class="tiny">tracking URI + backend store + artifacts</text>
+      <text x="428" y="284" class="tiny">scripts/_tracking.py</text>
+
+      <text x="828" y="44" class="chip">OBSERVABILITY</text>
+      <text x="828" y="90" class="card-title">
+        <tspan x="828" dy="0">Metrics and</tspan>
+        <tspan x="828" dy="34">dashboards</tspan>
+      </text>
+      <text x="828" y="164" class="small">
+        <tspan x="828" dy="0">Prometheus scrapes metrics. Grafana and</tspan>
+        <tspan x="828" dy="22">Loki join through the monitoring profile.</tspan>
+      </text>
+      <text x="828" y="258" class="tiny">prometheus | grafana | loki | promtail</text>
+      <text x="828" y="284" class="tiny">healthchecks and container telemetry</text>
+    </g>
+  </g>
+
+  <g transform="translate(2820 500)">
+    <rect x="0" y="0" width="1180" height="2060" rx="38" fill="#0B1120" fill-opacity="0.58" stroke="#34D399" stroke-opacity="0.65" stroke-width="3" />
+    <text x="40" y="70" class="section-kicker">RIGHT LANE / RUNTIME EXPERIENCE</text>
+    <text x="40" y="136" class="section-title">Compose deployment</text>
+    <text x="40" y="184" class="card-body">
+      <tspan x="40" dy="0">Users reach the app through the web UI and API docs, while</tspan>
+      <tspan x="40" dy="26">Docker Compose wires API, Postgres, MLflow, and observability.</tspan>
+    </text>
+    <g transform="translate(40 248)">
+      <rect x="0" y="0" width="1100" height="232" rx="28" fill="url(#cardGreen)" stroke="#6EE7B7" stroke-opacity="0.62" />
+      <text x="28" y="46" class="chip">USER ENTRY POINTS</text>
+      <text x="28" y="98" class="card-title">How people use the system</text>
+      <text x="28" y="146" class="card-body">
+        <tspan x="28" dy="0">React Native web at root, the legacy static UI under /rn,</tspan>
+        <tspan x="28" dy="26">OpenAPI docs, Redoc, and direct API clients.</tspan>
+      </text>
+      <rect x="28" y="172" width="204" height="38" rx="19" fill="#312E81" />
+      <rect x="246" y="172" width="186" height="38" rx="19" fill="#0C4A6E" />
+      <rect x="446" y="172" width="146" height="38" rx="19" fill="#065F46" />
+      <rect x="606" y="172" width="160" height="38" rx="19" fill="#B45309" />
+      <rect x="780" y="172" width="176" height="38" rx="19" fill="#9F1239" />
+      <text x="56" y="197" class="tiny">RN WEB UI</text>
+      <text x="278" y="197" class="tiny">STATIC /RN</text>
+      <text x="479" y="197" class="tiny">/DOCS</text>
+      <text x="642" y="197" class="tiny">/REDOC</text>
+      <text x="816" y="197" class="tiny">API CLIENTS</text>
+    </g>
+
+    <g transform="translate(40 522)">
+      <rect x="0" y="0" width="1100" height="744" rx="32" fill="#111827" fill-opacity="0.82" stroke="#34D399" stroke-opacity="0.58" />
+      <text x="28" y="46" class="chip">DOCKER COMPOSE ORCHESTRATION</text>
+      <text x="28" y="96" class="card-title">Local deployment stack</text>
+      <text x="28" y="142" class="card-body">
+        <tspan x="28" dy="0">Compose brings up API, Postgres, and MLflow by default.</tspan>
+        <tspan x="28" dy="26">Monitoring and tests join through profiles or service runs.</tspan>
+      </text>
+
+      <rect x="34" y="188" width="312" height="190" rx="26" fill="#0F3B68" stroke="#93C5FD" stroke-opacity="0.55" />
+      <rect x="392" y="188" width="312" height="190" rx="26" fill="#1E1B4B" stroke="#C4B5FD" stroke-opacity="0.55" />
+      <rect x="750" y="188" width="316" height="190" rx="26" fill="#064E3B" stroke="#6EE7B7" stroke-opacity="0.55" />
+      <text x="60" y="236" class="chip">API CONTAINER</text>
+      <text x="60" y="286" class="card-title">smc-inference-api</text>
+      <text x="60" y="330" class="small">
+        <tspan x="60" dy="0">FastAPI, pipeline loading,</tspan>
+        <tspan x="60" dy="22">static serving, metrics</tspan>
+      </text>
+      <text x="418" y="236" class="chip">DB CONTAINER</text>
+      <text x="418" y="286" class="card-title">smc-postgres</text>
+      <text x="418" y="330" class="small">
+        <tspan x="418" dy="0">Persistent history and</tspan>
+        <tspan x="418" dy="22">secret-driven DB access</tspan>
+      </text>
+      <text x="776" y="236" class="chip">TRACKING</text>
+      <text x="776" y="286" class="card-title">smc-mlflow</text>
+      <text x="776" y="330" class="small">
+        <tspan x="776" dy="0">Experiment UI, backend store,</tspan>
+        <tspan x="776" dy="22">and artifact root</tspan>
+      </text>
+
+      <rect x="34" y="414" width="496" height="246" rx="26" fill="#0F172A" fill-opacity="0.84" stroke="#67E8F9" stroke-opacity="0.5" />
+      <rect x="570" y="414" width="496" height="246" rx="26" fill="#0F172A" fill-opacity="0.84" stroke="#86EFAC" stroke-opacity="0.5" />
+      <text x="60" y="460" class="chip">MONITORING PROFILE</text>
+      <text x="60" y="508" class="card-title">
+        <tspan x="60" dy="0">Prometheus + Grafana</tspan>
+        <tspan x="60" dy="34">+ Loki + Promtail</tspan>
+      </text>
+      <text x="60" y="572" class="small">
+        <tspan x="60" dy="0">Optional services extend runtime visibility</tspan>
+        <tspan x="60" dy="22">without changing the core API flow.</tspan>
+      </text>
+      <text x="60" y="608" class="tiny">docker compose --profile monitoring up -d</text>
+      <text x="596" y="460" class="chip">TEST PROFILE</text>
+      <text x="596" y="508" class="card-title">Compose-backed E2E checks</text>
+      <text x="596" y="552" class="small">
+        <tspan x="596" dy="0">The tests service validates API behavior</tspan>
+        <tspan x="596" dy="22">against the running stack and storage mode.</tspan>
+      </text>
+      <text x="596" y="608" class="tiny">docker compose run --rm tests</text>
+    </g>
+
+    <g transform="translate(40 1310)">
+      <rect x="0" y="0" width="1100" height="618" rx="32" fill="url(#cardBlue)" stroke="#93C5FD" stroke-opacity="0.6" />
+      <text x="28" y="46" class="chip">ONLINE INFERENCE FLOW</text>
+      <text x="28" y="96" class="card-title">What happens after an image is uploaded</text>
+      <rect x="28" y="142" width="184" height="94" rx="22" fill="#312E81" />
+      <rect x="238" y="142" width="194" height="94" rx="22" fill="#0F766E" />
+      <rect x="458" y="142" width="186" height="94" rx="22" fill="#14532D" />
+      <rect x="670" y="142" width="180" height="94" rx="22" fill="#B45309" />
+      <rect x="876" y="142" width="196" height="94" rx="22" fill="#9F1239" />
+      <text x="56" y="198" class="chip">UPLOAD</text>
+      <text x="272" y="198" class="chip">SPOOF CHECK</text>
+      <text x="486" y="198" class="chip">DETECT</text>
+      <text x="700" y="198" class="chip">ROUTE TARGET</text>
+      <text x="908" y="198" class="chip">CLASSIFY</text>
+      <path d="M212 188H238" class="link" stroke="#A78BFA" stroke-width="8" marker-end="url(#arrowPurple)" />
+      <path d="M432 188H458" class="link" stroke="#6EE7B7" stroke-width="8" marker-end="url(#arrowGreen)" />
+      <path d="M644 188H670" class="link" stroke="#FCD34D" stroke-width="8" marker-end="url(#arrowAmber)" />
+      <path d="M850 188H876" class="link" stroke="#FB7185" stroke-width="8" marker-end="url(#arrowPurple)" />
+      <text x="28" y="308" class="card-body">
+        <tspan x="28" dy="0">The API returns detections, chosen target, classification output,</tspan>
+        <tspan x="28" dy="26">warning flags, model metadata, and measured latency.</tspan>
+      </text>
+
+      <rect x="28" y="354" width="328" height="206" rx="26" fill="#111827" fill-opacity="0.85" stroke="#C4B5FD" stroke-opacity="0.48" />
+      <rect x="386" y="354" width="328" height="206" rx="26" fill="#111827" fill-opacity="0.85" stroke="#93C5FD" stroke-opacity="0.48" />
+      <rect x="744" y="354" width="328" height="206" rx="26" fill="#111827" fill-opacity="0.85" stroke="#86EFAC" stroke-opacity="0.48" />
+      <text x="56" y="402" class="chip">RESULTS</text>
+      <text x="56" y="446" class="card-title">Prediction payload</text>
+      <text x="56" y="486" class="small">
+        <tspan x="56" dy="0">detections, top class,</tspan>
+        <tspan x="56" dy="22">warnings, top-k outputs</tspan>
+      </text>
+      <text x="414" y="402" class="chip">PERSISTENCE</text>
+      <text x="414" y="446" class="card-title">History write</text>
+      <text x="414" y="486" class="small">
+        <tspan x="414" dy="0">database rows or</tspan>
+        <tspan x="414" dy="22">local JSONL fallback</tspan>
+      </text>
+      <text x="772" y="402" class="chip">OPERATIONS</text>
+      <text x="772" y="446" class="card-title">
+        <tspan x="772" dy="0">Telemetry and</tspan>
+        <tspan x="772" dy="34">retraining signal</tspan>
+      </text>
+      <text x="772" y="520" class="small">
+        <tspan x="772" dy="0">metrics, logs, MLflow lineage,</tspan>
+        <tspan x="772" dy="22">future refresh signals</tspan>
+      </text>
+    </g>
+  </g>
+
+  <g>
+    <path d="M1260 1900C1380 1900 1430 1840 1480 1790" class="link" stroke="#A78BFA" stroke-width="12" marker-end="url(#arrowPurple)" />
+    <path d="M2720 1550C2790 1550 2810 1550 2860 1550" class="link" stroke="#34D399" stroke-width="12" marker-end="url(#arrowGreen)" />
+    <path d="M2680 930C2790 930 2830 920 2880 910" class="link" stroke="#67E8F9" stroke-width="10" marker-end="url(#arrowGreen)" />
+    <path d="M3660 2580C3670 2820 2140 2850 860 2760C460 2730 240 2600 220 2400" class="link" stroke="#FBBF24" stroke-width="10" stroke-dasharray="20 20" marker-end="url(#arrowAmber)" />
+    <text x="1220" y="2636" class="path-label">monitoring and retraining feedback loop</text>
+  </g>
+
+  <g transform="translate(220 2670)">
+    <rect x="0" y="0" width="3760" height="138" rx="30" fill="#020617" fill-opacity="0.7" stroke="url(#panelStroke)" stroke-opacity="0.45" />
+    <text x="32" y="45" class="chip">DISPLAY NOTE</text>
+    <text x="32" y="82" class="small">SVG poster sized for A3 landscape. Keep vector output, fit to 420 x 297 mm, and use matte stock for display-board printing.</text>
+    <text x="32" y="110" class="tiny">Current repo focus: FastAPI | React Native web | Postgres | MLflow | Docker Compose | optional AWS + observability</text>
+  </g>
+</svg>
