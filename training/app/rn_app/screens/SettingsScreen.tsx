@@ -273,12 +273,12 @@ export default function SettingsScreen() {
 
             {/* Debug */}
             {renderSection('Developer', 'code-slash-outline', <>
-                {renderRow('Show Debug Panel', 'Display raw JSON in inference view', (
+                {renderRow('Debug Mode', 'Show API configuration and debug panels', (
                     <Switch
-                        value={settings.showDebugPanel}
-                        onValueChange={(v) => update({ showDebugPanel: v })}
-                        trackColor={switchTrack(settings.showDebugPanel)}
-                        thumbColor={switchThumb(settings.showDebugPanel)}
+                        value={settings.debugModeEnabled}
+                        onValueChange={(v) => update({ debugModeEnabled: v })}
+                        trackColor={switchTrack(settings.debugModeEnabled)}
+                        thumbColor={switchThumb(settings.debugModeEnabled)}
                     />
                 ))}
             </>, 360)}

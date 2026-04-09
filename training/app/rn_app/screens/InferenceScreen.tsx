@@ -695,26 +695,28 @@ export default function InferenceScreen() {
     return (
         <ScrollView style={[styles.container, { backgroundColor: tc.background }]} contentContainerStyle={styles.scroll}>
             {/* ── API Config ── */}
-            <SectionCard title="API Configuration" icon="settings-outline">
-                <View style={styles.inputRow}>
-                    <TextInput
-                        value={settings.apiBaseUrl}
-                        onChangeText={(v) => update({ apiBaseUrl: v })}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        placeholder="http://localhost:8080"
-                        placeholderTextColor={tc.textMuted}
-                        style={[styles.textInput, typ.mono, {
-                            backgroundColor: tc.surfaceElevated,
-                            color: tc.textPrimary,
-                            borderColor: tc.border,
-                        }]}
-                    />
-                </View>
-                <Text style={[typ.caption, { color: tc.textMuted, marginTop: spacing.xs }]}>
-                    Endpoint: {inferUrl}
-                </Text>
-            </SectionCard>
+            {settings.debugModeEnabled && (
+                <SectionCard title="API Configuration" icon="settings-outline">
+                    <View style={styles.inputRow}>
+                        <TextInput
+                            value={settings.apiBaseUrl}
+                            onChangeText={(v) => update({ apiBaseUrl: v })}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            placeholder="http://localhost:8080"
+                            placeholderTextColor={tc.textMuted}
+                            style={[styles.textInput, typ.mono, {
+                                backgroundColor: tc.surfaceElevated,
+                                color: tc.textPrimary,
+                                borderColor: tc.border,
+                            }]}
+                        />
+                    </View>
+                    <Text style={[typ.caption, { color: tc.textMuted, marginTop: spacing.xs }]}>
+                        Endpoint: {inferUrl}
+                    </Text>
+                </SectionCard>
+            )}
 
             {/* ── Upload ── */}
             <SectionCard title="Upload Image" icon="image-outline">
@@ -939,7 +941,7 @@ export default function InferenceScreen() {
                 </SectionCard>
             )}
 
-            {settings.showDebugPanel && (
+            {settings.debugModeEnabled && (
                 <DebugPanel jsonData={result} timing={timing} apiUrl={inferUrl} pipelineModels={pipelineModels} />
             )}
 

@@ -22,7 +22,7 @@ export type Settings = {
     highContrast: boolean;
     largeFonts: boolean;
     hapticFeedback: boolean;
-    showDebugPanel: boolean;
+    debugModeEnabled: boolean;
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -36,11 +36,11 @@ const DEFAULT_SETTINGS: Settings = {
     liveStabilityIou: 0.45,
     ttsEnabled: true,
     ttsSpeed: 1.0,
-    darkMode: true,
+    darkMode: false,
     highContrast: false,
     largeFonts: false,
     hapticFeedback: true,
-    showDebugPanel: true,
+    debugModeEnabled: false,
 };
 
 type SettingsContextType = {
@@ -72,9 +72,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             try {
                 const stored = await AsyncStorage.getItem(STORAGE_KEY);
                 if (stored) {
-                    const parsed = JSON.parse(stored);
+                    const parsed = JSON.parse(stored) as Partial<Settings> & { showDebugPanel?: boolean };
+                    const migrated: Partial<Settings> = { ...parsed };
+                    if (typeof migrated.debugModeEnabled !== 'boolean' && typeof parsed.showDebugPanel === 'boolean') {
+                        migrated.debugModeEnabled = parsed.showDebugPanel;
+                    }
+                    delete (migrated as any).showDebugPanel;
                     // Merge with defaults to handle new keys added in updates
-                    setSettings((prev) => ({ ...prev, ...parsed }));
+                    setSettings((prev) => ({ ...prev, ...migrated }));
                 }
             } catch (e) {
                 console.warn('[SettingsContext] Failed to load settings:', e);
