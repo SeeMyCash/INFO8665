@@ -17,6 +17,13 @@ export default defineConfig({
         video: 'retain-on-failure',
         screenshot: 'only-on-failure',
         viewport: { width: 1440, height: 1080 },
+        permissions: ['camera'],
+        launchOptions: {
+            args: [
+                '--use-fake-ui-for-media-stream',
+                '--use-fake-device-for-media-stream',
+            ],
+        },
     },
     webServer: {
         command: 'npm run build:web && npx http-server dist -p 4173 -c-1',
