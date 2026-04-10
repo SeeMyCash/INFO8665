@@ -6,6 +6,8 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = '@smc/settings';
+const SETTINGS_VERSION_KEY = '@smc/settings/version';
+const SETTINGS_SCHEMA_VERSION = 2;
 
 export type Settings = {
     apiBaseUrl: string;
@@ -71,6 +73,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         (async () => {
             try {
                 const stored = await AsyncStorage.getItem(STORAGE_KEY);
+                const storedVersionRaw = await AsyncStorage.getItem(SETTINGS_VERSION_KEY);
+                const storedVersion = Number(storedVersionRaw || 0);
+
                 if (stored) {
                     const parsed = JSON.parse(stored) as Partial<Settings> & { showDebugPanel?: boolean };
                     const migrated: Partial<Settings> = { ...parsed };
@@ -78,9 +83,19 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
                         migrated.debugModeEnabled = parsed.showDebugPanel;
                     }
                     delete (migrated as any).showDebugPanel;
+
+                    // One-time migration: ensure the app starts in light mode with debug mode off.
+                    // This updates existing installs that previously persisted dark/debug states.
+                    if (!Number.isFinite(storedVersion) || storedVersion < SETTINGS_SCHEMA_VERSION) {
+                        migrated.darkMode = false;
+                        migrated.debugModeEnabled = false;
+                    }
+
                     // Merge with defaults to handle new keys added in updates
                     setSettings((prev) => ({ ...prev, ...migrated }));
                 }
+
+                await AsyncStorage.setItem(SETTINGS_VERSION_KEY, String(SETTINGS_SCHEMA_VERSION));
             } catch (e) {
                 console.warn('[SettingsContext] Failed to load settings:', e);
             } finally {
@@ -108,7 +123,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
     const clearStorage = useCallback(async () => {
         try {
-            await AsyncStorage.removeItem(STORAGE_KEY);
+            await AsyncStorage.multiRemove([STORAGE_KEY, SETTINGS_VERSION_KEY]);
             setSettings(DEFAULT_SETTINGS);
         } catch (e) {
             console.warn('[SettingsContext] Failed to clear storage:', e);
