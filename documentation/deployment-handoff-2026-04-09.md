@@ -100,6 +100,31 @@ aws autoscaling start-instance-refresh `
   --preferences MinHealthyPercentage=0,InstanceWarmup=180
 ```
 
+### Deployment incident and fix (important)
+
+The first refresh (`REDACTED_REFRESH_ID_1`) completed at ASG level, but runtime was not healthy:
+
+- Target group showed `Target.FailedHealthChecks` on `:8080`.
+- Diagnostics via SSM showed cloud-init `scripts-user` failed and `/opt/smc-inference/venv` was missing.
+- Root cause: the uploaded zip had Windows `\` entry separators.
+  - Linux `unzip` warned: `appears to use backslashes as path separators`.
+  - In this bootstrap, `set -e` caused the script to stop on the non-zero unzip exit code.
+
+Fix applied:
+
+1. Repacked artifact with POSIX `/` zip entry names.
+2. Backed up broken upload:
+   - `inference-app/current/backups/inference_app-BROKEN-WINDOWSZIP-20260409_1955.zip`
+3. Re-uploaded corrected artifact to:
+   - `inference-app/current/inference_app.zip`
+4. Triggered second ASG refresh:
+   - `REDACTED_REFRESH_ID_2`
+5. Verified final healthy state:
+   - ASG instance: `REDACTED_INSTANCE_ID` (`InService`, `Healthy`)
+   - Target group health: `healthy`
+   - Service on instance: `ActiveState=active`, `SubState=running`
+   - Local app check on instance: `curl http://127.0.0.1:8080/api/health` succeeded
+
 ## Spot Survivability Rationale
 
 The service is resilient to Spot replacement because:
@@ -123,4 +148,3 @@ aws autoscaling start-instance-refresh `
   --auto-scaling-group-name smc-inference-asg `
   --preferences MinHealthyPercentage=0,InstanceWarmup=180
 ```
-
