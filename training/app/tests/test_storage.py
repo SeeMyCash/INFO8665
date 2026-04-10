@@ -137,7 +137,11 @@ def test_pipeline_infer_persists_history(tmp_path, monkeypatch):
     reset_inference_history_service()
 
     monkeypatch.setattr(main_module, "ensure_pipeline_models", lambda allow_refresh_from_defaults=True: None)
-    monkeypatch.setattr(pipeline_endpoint, "run_full_process", lambda image, top_k_targets=1, spoof_guard_enabled=None: _sample_result())
+    monkeypatch.setattr(
+        pipeline_endpoint,
+        "run_full_process",
+        lambda image, top_k_targets=1, spoof_guard_enabled=None, detector_conf_threshold=None, classifier_conf_threshold=None: _sample_result(),
+    )
     monkeypatch.setattr(pipeline_service, "_pipeline_detector", SimpleNamespace(name="detector"))
     monkeypatch.setattr(pipeline_service, "_pipeline_bill_reader", SimpleNamespace(name="bill_reader"))
     monkeypatch.setattr(pipeline_service, "_pipeline_coin_classifier", SimpleNamespace(name="coin_classifier"))
