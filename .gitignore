@@ -38,3 +38,13 @@ Thumbs.db
 *.swp
 *.swo
 
+# Local scratch / generated mobile artifacts
+_tmp_*
+training/app/rn_app/_tmp_*
+training/app/rn_app/android/
+training/app/rn_app/outputs/
+outputs/mobile-build/
+outputs/mobile_probe/
+outputs/mobile_probe18/
+training/outputs/app-data/
+
