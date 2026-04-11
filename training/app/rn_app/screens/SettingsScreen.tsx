@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet, Switch, Pressable, TextInput, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSettings, DEFAULT_SETTINGS } from '../contexts/SettingsContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../contexts/HistoryContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { DEMO_FLOW_OPTIONS, getDemoScenario } from '../demo/demoFlows';
 import GradientButton from '../components/GradientButton';
 import AnimatedCard from '../components/AnimatedCard';
 import { useToast } from '../components/Toast';
@@ -18,6 +19,7 @@ export default function SettingsScreen() {
     const { entries, clearStorage: clearHistoryStorage, count: historyCount } = useHistory();
     const { tc, isDark, typography: typ } = useThemeColors();
     const { show } = useToast();
+    const selectedDemoScenario = getDemoScenario(settings.demoFlowMode);
 
     const handleReset = () => {
         reset();
@@ -135,6 +137,37 @@ export default function SettingsScreen() {
 
     const switchThumb = (active: boolean, color?: string) =>
         active ? (color || tc.primary) : tc.textMuted;
+
+    const renderDemoOption = (option: (typeof DEMO_FLOW_OPTIONS)[number]) => {
+        const selected = settings.demoFlowMode === option.value;
+        return (
+            <Pressable
+                key={option.value}
+                onPress={() => update({ demoFlowMode: option.value })}
+                style={[
+                    styles.demoOption,
+                    {
+                        backgroundColor: selected ? tc.primary + '12' : tc.surfaceElevated,
+                        borderColor: selected ? tc.primary : tc.border,
+                    },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={option.label}
+                accessibilityState={{ selected }}
+                testID={`demo-flow-${option.value}`}
+            >
+                <View style={styles.demoOptionHeader}>
+                    <Text style={[typ.bodyBold, { color: tc.textPrimary, flex: 1 }]}>{option.label}</Text>
+                    <Ionicons
+                        name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={18}
+                        color={selected ? tc.primary : tc.textMuted}
+                    />
+                </View>
+                <Text style={[typ.caption, { color: tc.textMuted }]}>{option.summary}</Text>
+            </Pressable>
+        );
+    };
 
     return (
         <ScrollView style={[styles.container, { backgroundColor: tc.background }]} contentContainerStyle={styles.scroll}>
@@ -271,6 +304,32 @@ export default function SettingsScreen() {
                 ))}
             </>, 300)}
 
+            {/* Demo flows */}
+            {renderSection('Demo Flows', 'flash-outline', <>
+                <Text style={[typ.caption, styles.demoIntro, { color: tc.textMuted }]}>
+                    Arm a scripted demo flow. On the Scan tab, pressing Start Camera will trigger the selected scenario immediately.
+                </Text>
+                <View style={styles.demoOptionList}>
+                    {DEMO_FLOW_OPTIONS.map(renderDemoOption)}
+                </View>
+                {selectedDemoScenario && (
+                    <View
+                        style={[
+                            styles.demoStatus,
+                            {
+                                backgroundColor: tc.warning + '12',
+                                borderColor: tc.warning + '33',
+                            },
+                        ]}
+                    >
+                        <Ionicons name="megaphone-outline" size={16} color={tc.warning} />
+                        <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                            {selectedDemoScenario.activationHint}
+                        </Text>
+                    </View>
+                )}
+            </>, 330)}
+
             {/* Debug */}
             {renderSection('Developer', 'code-slash-outline', <>
                 {renderRow('Debug Mode', 'Show API configuration and debug panels', (
@@ -343,6 +402,34 @@ const styles = StyleSheet.create({
     thresholdRow: { flexDirection: 'row', gap: spacing.xs },
     thresholdBtn: {
         paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radii.sm,
+    },
+    demoIntro: {
+        marginBottom: spacing.md,
+        lineHeight: 18,
+    },
+    demoOptionList: {
+        gap: spacing.sm,
+    },
+    demoOption: {
+        borderRadius: radii.md,
+        borderWidth: 1,
+        padding: spacing.md,
+        gap: spacing.xs,
+    },
+    demoOptionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+    },
+    demoStatus: {
+        marginTop: spacing.md,
+        borderWidth: 1,
+        borderRadius: radii.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
     },
     segmentWrap: {
         flexDirection: 'row', gap: 2, borderRadius: radii.sm, padding: 2,

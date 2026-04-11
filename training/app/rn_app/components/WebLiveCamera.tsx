@@ -54,6 +54,8 @@ const CLASS_COLORS: Record<string, string> = {
     NICKEL: '#60A5FA',
     DIME: '#A78BFA',
     QUARTER: '#F97316',
+    NGN_NOTE: '#DC2626',
+    SCREEN_SPOOF: '#DC2626',
 };
 
 /* ── Component ───────────────────────────────── */

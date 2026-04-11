@@ -7,6 +7,8 @@ outputs/app-data/
 mlruns/
 mlartifacts/
 node_modules/
+training/app/rn_app/playwright-report/
+training/app/rn_app/test-results/
 .env
 .env.*
 !.env.example

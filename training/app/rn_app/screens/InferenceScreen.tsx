@@ -21,6 +21,7 @@ import ImageWithOverlay from '../components/ImageWithOverlay';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../contexts/HistoryContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { getDemoScenario, type DemoFlowMode } from '../demo/demoFlows';
 import { spacing, radii, shadows } from '../theme';
 
 type PipelineResponse = {
@@ -289,6 +290,8 @@ export default function InferenceScreen() {
     const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
     const [permission, requestPermission] = useCameraPermissions();
     const [timing, setTiming] = useState<number | null>(null);
+    const [activeDemoMode, setActiveDemoMode] = useState<DemoFlowMode>('off');
+    const [voiceTranscript, setVoiceTranscript] = useState('');
     const [liveStability, setLiveStability] = useState<LiveStabilityStatus>({
         ...LIVE_STABILITY_IDLE,
         remainingMs: liveStabilityWindowMs,
@@ -312,6 +315,8 @@ export default function InferenceScreen() {
         () => settings.apiBaseUrl.replace(/\/$/, '') + '/api/pipeline/infer',
         [settings.apiBaseUrl]
     );
+    const selectedDemoScenario = useMemo(() => getDemoScenario(settings.demoFlowMode), [settings.demoFlowMode]);
+    const activeDemoScenario = useMemo(() => getDemoScenario(activeDemoMode), [activeDemoMode]);
 
     const effectiveResult = useMemo(
         () => (liveRunning ? (livePreviewResult || result) : result),
@@ -338,6 +343,7 @@ export default function InferenceScreen() {
     const speakAnnouncement = useCallback((text: string) => {
         const msg = String(text || '').trim();
         if (!msg) return;
+        setVoiceTranscript(msg);
 
         if (Platform.OS === 'web') {
             const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
@@ -386,6 +392,33 @@ export default function InferenceScreen() {
             remainingMs: liveStabilityWindowMs,
         });
     }, [liveStabilityWindowMs]);
+
+    const resetAnnouncementWindow = useCallback(() => {
+        lastAnnouncementKeyRef.current = '';
+        lastAnnouncementAtRef.current = 0;
+    }, []);
+
+    const applyDemoScenario = useCallback((mode: Exclude<DemoFlowMode, 'off'>) => {
+        const scenario = getDemoScenario(mode);
+        if (!scenario) return;
+
+        if (liveTimerRef.current) {
+            clearTimeout(liveTimerRef.current);
+            liveTimerRef.current = null;
+        }
+
+        setBusy(false);
+        setLiveRunning(false);
+        liveRunningRef.current = false;
+        setLivePreviewResult(null);
+        setImageUri(null);
+        setTiming(0);
+        setVoiceTranscript('');
+        resetAnnouncementWindow();
+        resetLiveStability();
+        setActiveDemoMode(mode);
+        setResult(scenario.result);
+    }, [resetAnnouncementWindow, resetLiveStability]);
 
     const applyLiveStability = useCallback((res: PipelineResponse) => {
         const now = Date.now();
@@ -532,6 +565,9 @@ export default function InferenceScreen() {
 
     async function runInfer() {
         if (!imageUri) { setResult({ error: 'Pick an image first' }); return; }
+        setActiveDemoMode('off');
+        setVoiceTranscript('');
+        resetAnnouncementWindow();
         setLivePreviewResult(null);
         setResult(null);
         setTiming(null);
@@ -539,22 +575,39 @@ export default function InferenceScreen() {
     }
 
     async function startCamera() {
+        if (selectedDemoScenario) {
+            setCameraActive(true);
+            applyDemoScenario(selectedDemoScenario.mode);
+            return;
+        }
         if (!permission?.granted) {
             const p = await requestPermission();
             if (!p.granted) { setResult({ error: 'Camera permission denied' }); return; }
         }
+        setActiveDemoMode('off');
+        setVoiceTranscript('');
+        resetAnnouncementWindow();
         setLivePreviewResult(null);
         resetLiveStability();
         setCameraActive(true);
     }
 
     function stopCamera() {
+        const hadDemoScenario = activeDemoMode !== 'off';
         setCameraActive(false);
         setLiveRunning(false);
         liveRunningRef.current = false;
         if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
         setLivePreviewResult(null);
+        setActiveDemoMode('off');
+        resetAnnouncementWindow();
         resetLiveStability();
+        if (hadDemoScenario) {
+            setResult(null);
+            setTiming(null);
+            setImageUri(null);
+            setVoiceTranscript('');
+        }
     }
 
     async function captureAndInferOnce() {
@@ -610,6 +663,10 @@ export default function InferenceScreen() {
     }
 
     function startLive() {
+        if (activeDemoScenario) {
+            applyDemoScenario(activeDemoScenario.mode);
+            return;
+        }
         if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
         setLiveRunning(true);
         liveRunningRef.current = true;
@@ -650,7 +707,20 @@ export default function InferenceScreen() {
             }
             return;
         }
+        if (cameraActive && activeDemoScenario) {
+            const key = `demo|${activeDemoScenario.mode}`;
+            if (key === lastAnnouncementKeyRef.current) return;
+
+            const now = Date.now();
+            if (now - lastAnnouncementAtRef.current < 250) return;
+
+            lastAnnouncementKeyRef.current = key;
+            lastAnnouncementAtRef.current = now;
+            speakAnnouncement(activeDemoScenario.voiceMessage);
+            return;
+        }
         if (!result || result.error) return;
+        if (activeDemoScenario) return;
 
         const dets = _extractDetections(result);
         const coinCount = dets.filter((d: any) => _isCoinClassName(d?.class_name)).length;
@@ -671,7 +741,7 @@ export default function InferenceScreen() {
             : `Detected ${billCount} bill${billCount === 1 ? '' : 's'} and ${coinCount} coin${coinCount === 1 ? '' : 's'}.`;
         const totalLine = `Guaranteed total amount is ${_toCadSpeech(guaranteedTotal)}.`;
         speakAnnouncement(`${countLine} ${totalLine}`);
-    }, [result, guaranteedClassifierSummary.total, settings.ttsEnabled, speakAnnouncement]);
+    }, [activeDemoScenario, cameraActive, result, guaranteedClassifierSummary.total, settings.ttsEnabled, speakAnnouncement]);
 
     useEffect(() => {
         return () => {
@@ -691,6 +761,7 @@ export default function InferenceScreen() {
             {children}
         </View>
     );
+    const activeAlertColor = activeDemoScenario?.bannerTone === 'warning' ? tc.warning : tc.error;
 
     return (
         <ScrollView style={[styles.container, { backgroundColor: tc.background }]} contentContainerStyle={styles.scroll}>
@@ -719,6 +790,25 @@ export default function InferenceScreen() {
             )}
 
             {/* ── Upload ── */}
+            {selectedDemoScenario && !cameraActive && (
+                <View
+                    testID="demo-flow-ready"
+                    style={[
+                        styles.banner,
+                        shadows.card,
+                        {
+                            backgroundColor: tc.info + '12',
+                            borderColor: tc.info + '33',
+                        },
+                    ]}
+                >
+                    <Ionicons name="flash-outline" size={18} color={tc.info} />
+                    <Text style={[typ.body, { color: tc.textSecondary, flex: 1 }]}>
+                        {selectedDemoScenario.activationHint}
+                    </Text>
+                </View>
+            )}
+
             <SectionCard title="Upload Image" icon="image-outline">
                 <View style={styles.buttonRow}>
                     <GradientButton title="Pick Image" onPress={pickImage} variant="outline" size="sm"
@@ -737,39 +827,98 @@ export default function InferenceScreen() {
             <SectionCard title="Live Camera" icon="videocam-outline">
                 {!cameraActive ? (
                     <GradientButton title="Start Camera" onPress={startCamera} variant="accent" size="sm"
+                        testID="scan-start-camera"
                         icon={<Ionicons name="camera-outline" size={16} color="#FFF" />} />
                 ) : (
                     <View style={styles.cameraBlock}>
-                        {Platform.OS === 'web' ? (
-                            <WebLiveCamera
-                                ref={webCamRef}
-                                facing={cameraFacing}
-                                detections={detections}
-                                active={cameraActive}
-                                height={300}
-                                onError={(msg) => setResult({ error: msg })}
-                            />
-                        ) : (
-                            <CameraView key={cameraFacing} ref={cameraRef} style={styles.cameraPreview} facing={cameraFacing} />
-                        )}
-                        <View style={styles.cameraControls}>
-                            <GradientButton title="Snap" onPress={captureAndInferOnce} disabled={busy} size="sm"
-                                icon={<Ionicons name="scan-outline" size={14} color="#FFF" />} />
-                            <GradientButton
-                                title={liveRunning ? 'Stop Live' : `Go Live (${settings.liveFps} fps)`}
-                                onPress={liveRunning ? stopLive : startLive}
-                                variant={liveRunning ? 'outline' : 'accent'}
-                                size="sm"
-                                icon={<Ionicons name={liveRunning ? 'pause' : 'play'} size={14} color={liveRunning ? tc.primary : '#FFF'} />}
-                            />
-                            <GradientButton
-                                title={cameraFacing === 'back' ? 'Front' : 'Back'}
-                                onPress={() => setCameraFacing((f) => (f === 'back' ? 'front' : 'back'))}
-                                variant="outline" size="sm"
-                                icon={<Ionicons name="camera-reverse-outline" size={14} color={tc.primary} />}
-                            />
+                        <View testID={activeDemoScenario ? 'demo-camera-preview' : undefined} style={styles.cameraViewport}>
+                            {Platform.OS === 'web' ? (
+                                <WebLiveCamera
+                                    ref={webCamRef}
+                                    facing={cameraFacing}
+                                    detections={activeDemoScenario ? [] : detections}
+                                    active={cameraActive}
+                                    height={300}
+                                    onError={(msg) => setResult({ error: msg })}
+                                />
+                            ) : (
+                                <CameraView key={cameraFacing} ref={cameraRef} style={styles.cameraPreview} facing={cameraFacing} />
+                            )}
+                            {activeDemoScenario && (
+                                <>
+                                    <View
+                                        style={[
+                                            styles.demoPreviewGlow,
+                                            { backgroundColor: activeDemoScenario.boxColor + '10' },
+                                        ]}
+                                    />
+                                    <View
+                                        testID="demo-bounding-box"
+                                        style={[
+                                            styles.demoBoundingBox,
+                                            {
+                                                borderColor: activeDemoScenario.boxColor,
+                                                backgroundColor: activeDemoScenario.boxColor + '12',
+                                            },
+                                        ]}
+                                    >
+                                        <View
+                                            style={[
+                                                styles.demoBoundingLabel,
+                                                { backgroundColor: activeDemoScenario.boxColor },
+                                            ]}
+                                        >
+                                            <Text style={styles.demoBoundingLabelText}>{activeDemoScenario.boxLabel}</Text>
+                                        </View>
+                                    </View>
+                                    <View
+                                        style={[
+                                            styles.demoScenarioCaption,
+                                            {
+                                                backgroundColor: tc.surface + 'EE',
+                                                borderColor: activeDemoScenario.boxColor + '55',
+                                            },
+                                        ]}
+                                    >
+                                        <Text style={[typ.bodyBold, { color: tc.textPrimary }]}>{activeDemoScenario.previewTitle}</Text>
+                                        <Text style={[typ.caption, { color: tc.textSecondary }]}>
+                                            {activeDemoScenario.previewBody}
+                                        </Text>
+                                    </View>
+                                </>
+                            )}
                         </View>
-                        {liveRunning && (
+                        <View style={styles.cameraControls}>
+                            {activeDemoScenario ? (
+                                <GradientButton
+                                    title="Replay Demo"
+                                    onPress={() => applyDemoScenario(activeDemoScenario.mode)}
+                                    variant="accent"
+                                    size="sm"
+                                    testID="scan-replay-demo"
+                                    icon={<Ionicons name="refresh-outline" size={14} color="#FFF" />}
+                                />
+                            ) : (
+                                <>
+                                    <GradientButton title="Snap" onPress={captureAndInferOnce} disabled={busy} size="sm"
+                                        icon={<Ionicons name="scan-outline" size={14} color="#FFF" />} />
+                                    <GradientButton
+                                        title={liveRunning ? 'Stop Live' : `Go Live (${settings.liveFps} fps)`}
+                                        onPress={liveRunning ? stopLive : startLive}
+                                        variant={liveRunning ? 'outline' : 'accent'}
+                                        size="sm"
+                                        icon={<Ionicons name={liveRunning ? 'pause' : 'play'} size={14} color={liveRunning ? tc.primary : '#FFF'} />}
+                                    />
+                                    <GradientButton
+                                        title={cameraFacing === 'back' ? 'Front' : 'Back'}
+                                        onPress={() => setCameraFacing((f) => (f === 'back' ? 'front' : 'back'))}
+                                        variant="outline" size="sm"
+                                        icon={<Ionicons name="camera-reverse-outline" size={14} color={tc.primary} />}
+                                    />
+                                </>
+                            )}
+                        </View>
+                        {liveRunning && !activeDemoScenario && (
                             <View style={[styles.liveStatus, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}>
                                 <Ionicons
                                     name={liveStability.mode === 'stable' ? 'checkmark-circle' : 'time-outline'}
@@ -784,6 +933,7 @@ export default function InferenceScreen() {
                             </View>
                         )}
                         <GradientButton title="Stop Camera" onPress={stopCamera} variant="outline" size="sm"
+                            testID="scan-stop-camera"
                             icon={<Ionicons name="close" size={14} color={tc.primary} />}
                             style={{ marginTop: spacing.sm }} />
                     </View>
@@ -811,7 +961,33 @@ export default function InferenceScreen() {
             )}
 
             {/* ── Error ── */}
-            {spoofCheck?.suspected && (
+            {activeDemoScenario && (
+                <View
+                    testID="demo-alert-banner"
+                    style={[
+                        styles.banner,
+                        shadows.card,
+                        {
+                            backgroundColor: activeAlertColor + '15',
+                            borderColor: activeAlertColor + '33',
+                        },
+                    ]}
+                >
+                    <Ionicons
+                        name={activeDemoScenario.bannerTone === 'warning' ? 'warning-outline' : 'alert-circle-outline'}
+                        size={18}
+                        color={activeAlertColor}
+                    />
+                    <View style={{ flex: 1 }}>
+                        <Text style={[typ.bodyBold, { color: activeAlertColor }]}>{activeDemoScenario.alertTitle}</Text>
+                        <Text style={[typ.caption, { color: tc.textSecondary, marginTop: 2 }]}>
+                            {activeDemoScenario.alertMessage}
+                        </Text>
+                    </View>
+                </View>
+            )}
+
+            {spoofCheck?.suspected && !activeDemoScenario && (
                 <View
                     style={[
                         styles.banner,
@@ -843,6 +1019,74 @@ export default function InferenceScreen() {
             )}
 
             {/* ── Detections ── */}
+            {activeDemoScenario?.budgetSummary && (
+                <SectionCard title="Budget Guard" icon="wallet-outline">
+                    <View
+                        testID="budget-summary-card"
+                        style={[
+                            styles.budgetCard,
+                            {
+                                backgroundColor: tc.surfaceElevated,
+                                borderColor: tc.border,
+                            },
+                        ]}
+                    >
+                        <View style={styles.budgetRow}>
+                            <Text style={[typ.caption, { color: tc.textSecondary }]}>Weekly budget</Text>
+                            <Text style={[typ.bodyBold, { color: tc.textPrimary }]}>
+                                {_formatCad(activeDemoScenario.budgetSummary.weeklyBudget)}
+                            </Text>
+                        </View>
+                        <View style={styles.budgetRow}>
+                            <Text style={[typ.caption, { color: tc.textSecondary }]}>Already spent this week</Text>
+                            <Text style={[typ.bodyBold, { color: tc.textPrimary }]}>
+                                {_formatCad(activeDemoScenario.budgetSummary.spentSoFar)}
+                            </Text>
+                        </View>
+                        <View style={styles.budgetRow}>
+                            <Text style={[typ.caption, { color: tc.textSecondary }]}>Detected spend</Text>
+                            <Text style={[typ.bodyBold, { color: tc.warning }]}>
+                                {_formatCad(activeDemoScenario.budgetSummary.detectedSpend)}
+                            </Text>
+                        </View>
+                        <View
+                            style={[
+                                styles.budgetImpact,
+                                {
+                                    backgroundColor: tc.warning + '12',
+                                    borderColor: tc.warning + '33',
+                                },
+                            ]}
+                        >
+                            <Ionicons name="trending-up-outline" size={16} color={tc.warning} />
+                            <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                                {`Projected weekly spend becomes ${_formatCad(activeDemoScenario.budgetSummary.projectedSpend)}. That is ${_formatCad(activeDemoScenario.budgetSummary.overBy)} over budget.`}
+                            </Text>
+                        </View>
+                    </View>
+                </SectionCard>
+            )}
+
+            {voiceTranscript ? (
+                <SectionCard title="Voice Output" icon="volume-high-outline">
+                    <View
+                        testID="voice-output-card"
+                        style={[
+                            styles.voiceCard,
+                            {
+                                backgroundColor: tc.surfaceElevated,
+                                borderColor: tc.border,
+                            },
+                        ]}
+                    >
+                        <Text style={[typ.caption, { color: tc.textMuted }]}>Last spoken message</Text>
+                        <Text testID="voice-output-text" style={[typ.bodyBold, { color: tc.textPrimary }]}>
+                            {voiceTranscript}
+                        </Text>
+                    </View>
+                </SectionCard>
+            ) : null}
+
             {detections.length > 0 && (
                 <SectionCard
                     title={`Detections (${detections.length}${allDetections.length > detections.length ? ` of ${allDetections.length}` : ''})`}
@@ -908,14 +1152,17 @@ export default function InferenceScreen() {
 
             {(result?.result?.classification || topCandidates.length > 0) && (
                 <SectionCard title="Guaranteed Amount" icon="cash-outline">
-                    <View style={[styles.guaranteedCard, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}>
+                    <View
+                        testID="guaranteed-amount-card"
+                        style={[styles.guaranteedCard, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}
+                    >
                         <View style={styles.guaranteedHeaderRow}>
                             <Text style={[typ.caption, { color: tc.textSecondary }]}>Classifier-backed minimum</Text>
                             <Text style={[typ.caption, { color: tc.textMuted }]}>
                                 {`>= ${guaranteedClassifierSummary.thresholdPct}% top-1`}
                             </Text>
                         </View>
-                        <Text style={[styles.guaranteedAmount, { color: tc.accent }]}>
+                        <Text testID="guaranteed-amount-value" style={[styles.guaranteedAmount, { color: tc.accent }]}>
                             {_formatCad(guaranteedClassifierSummary.total)}
                         </Text>
                         <Text style={[typ.caption, { color: tc.textMuted }]}>
@@ -959,7 +1206,59 @@ const styles = StyleSheet.create({
     textInput: { flex: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: 1 },
     buttonRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
     cameraBlock: { gap: spacing.sm },
-    cameraPreview: { width: '100%', height: 280, borderRadius: radii.md, overflow: 'hidden' },
+    cameraViewport: {
+        width: '100%',
+        height: 300,
+        borderRadius: radii.md,
+        overflow: 'hidden',
+        position: 'relative',
+        backgroundColor: '#000',
+    },
+    cameraPreview: { width: '100%', height: 300, borderRadius: radii.md, overflow: 'hidden' },
+    demoPreviewGlow: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        pointerEvents: 'none',
+    },
+    demoBoundingBox: {
+        position: 'absolute',
+        top: '12%',
+        left: '10%',
+        width: '80%',
+        height: '72%',
+        borderWidth: 4,
+        borderRadius: radii.md,
+        pointerEvents: 'none',
+    },
+    demoBoundingLabel: {
+        position: 'absolute',
+        top: -1,
+        left: -1,
+        borderTopLeftRadius: radii.sm,
+        borderBottomRightRadius: radii.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs,
+    },
+    demoBoundingLabelText: {
+        color: '#FFF',
+        fontSize: 12,
+        fontWeight: '800',
+        letterSpacing: 0.3,
+    },
+    demoScenarioCaption: {
+        position: 'absolute',
+        left: spacing.md,
+        right: spacing.md,
+        bottom: spacing.md,
+        borderRadius: radii.sm,
+        borderWidth: 1,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.sm,
+        gap: spacing.xs,
+    },
     cameraControls: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
     liveStatus: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
     previewCard: { borderRadius: radii.lg, overflow: 'hidden', borderWidth: 1 },
@@ -975,6 +1274,18 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         marginBottom: spacing.sm,
     },
+    budgetCard: { borderRadius: radii.md, borderWidth: 1, padding: spacing.md, gap: spacing.sm },
+    budgetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    budgetImpact: {
+        borderWidth: 1,
+        borderRadius: radii.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+    },
+    voiceCard: { borderRadius: radii.md, borderWidth: 1, padding: spacing.md, gap: spacing.sm },
     guaranteedCard: { borderRadius: radii.md, borderWidth: 1, padding: spacing.md, gap: spacing.sm },
     guaranteedHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     guaranteedAmount: { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },

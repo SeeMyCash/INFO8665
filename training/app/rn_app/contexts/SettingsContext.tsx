@@ -4,10 +4,12 @@
  */
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { DemoFlowMode } from '../demo/demoFlows';
 
 const STORAGE_KEY = '@smc/settings';
 const SETTINGS_VERSION_KEY = '@smc/settings/version';
 const SETTINGS_SCHEMA_VERSION = 2;
+const ENV = process.env as Record<string, string | undefined>;
 
 export type Settings = {
     apiBaseUrl: string;
@@ -25,10 +27,11 @@ export type Settings = {
     largeFonts: boolean;
     hapticFeedback: boolean;
     debugModeEnabled: boolean;
+    demoFlowMode: DemoFlowMode;
 };
 
 const DEFAULT_SETTINGS: Settings = {
-    apiBaseUrl: (process.env.EXPO_PUBLIC_API_BASE_URL as string | undefined) || (typeof window !== 'undefined' ? window.location.origin : 'https://smc.femilawal.com'),
+    apiBaseUrl: ENV.EXPO_PUBLIC_API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : 'https://smc.femilawal.com'),
     confidenceThreshold: 0.25,
     screenSpoofGuardEnabled: false,
     cameraResolution: 'medium',
@@ -43,6 +46,7 @@ const DEFAULT_SETTINGS: Settings = {
     largeFonts: false,
     hapticFeedback: true,
     debugModeEnabled: false,
+    demoFlowMode: 'off',
 };
 
 type SettingsContextType = {
@@ -123,7 +127,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
     const clearStorage = useCallback(async () => {
         try {
-            await AsyncStorage.multiRemove([STORAGE_KEY, SETTINGS_VERSION_KEY]);
+            await Promise.all([
+                AsyncStorage.removeItem(STORAGE_KEY),
+                AsyncStorage.removeItem(SETTINGS_VERSION_KEY),
+            ]);
             setSettings(DEFAULT_SETTINGS);
         } catch (e) {
             console.warn('[SettingsContext] Failed to clear storage:', e);

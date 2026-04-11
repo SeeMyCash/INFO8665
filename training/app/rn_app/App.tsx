@@ -69,9 +69,9 @@ function MainTabs() {
                 },
             })}
         >
-            <Tab.Screen name="Inference" component={InferenceScreen} options={{ title: 'Scan' }} />
-            <Tab.Screen name="History" component={HistoryScreen} options={{ title: 'History' }} />
-            <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+            <Tab.Screen name="Inference" component={InferenceScreen} options={{ title: 'Scan', tabBarButtonTestID: 'tab-scan' }} />
+            <Tab.Screen name="History" component={HistoryScreen} options={{ title: 'History', tabBarButtonTestID: 'tab-history' }} />
+            <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', tabBarButtonTestID: 'tab-settings' }} />
         </Tab.Navigator>
     );
 }

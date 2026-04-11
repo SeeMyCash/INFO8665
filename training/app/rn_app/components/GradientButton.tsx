@@ -13,6 +13,7 @@ type Props = {
     icon?: React.ReactNode;
     style?: ViewStyle;
     accessibilityHint?: string;
+    testID?: string;
 };
 
 export default function GradientButton({
@@ -24,6 +25,7 @@ export default function GradientButton({
     icon,
     style,
     accessibilityHint,
+    testID,
 }: Props) {
     const { tc, typography: typ } = useThemeColors();
 
@@ -50,6 +52,7 @@ export default function GradientButton({
             accessibilityLabel={title}
             accessibilityState={{ disabled }}
             accessibilityHint={accessibilityHint}
+            testID={testID}
             style={({ pressed }) => [
                 styles.pressable,
                 pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },

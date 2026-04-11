@@ -157,6 +157,7 @@ export default function LandingScreen({ navigation }: Props) {
                         title="Start Scanning"
                         onPress={() => navigation.navigate('MainTabs')}
                         size="lg"
+                        testID="landing-start-scanning"
                         icon={<Ionicons name="camera" size={20} color="#FFF" />}
                     />
                     <GradientButton
