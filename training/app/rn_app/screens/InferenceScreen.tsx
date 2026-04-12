@@ -303,6 +303,44 @@ function _sanitizeThreshold(raw: unknown, fallback: number): number {
     return Math.max(0.01, Math.min(0.99, value));
 }
 
+function _cloneFormData(fd: FormData): FormData {
+    const next = new FormData();
+    const anyFd = fd as any;
+
+    if (typeof anyFd.forEach === 'function') {
+        anyFd.forEach((value: any, key: string) => {
+            next.append(key, value);
+        });
+        return next;
+    }
+
+    const parts = Array.isArray(anyFd._parts) ? anyFd._parts : [];
+    for (const entry of parts) {
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        next.append(entry[0], entry[1]);
+    }
+    return next;
+}
+
+function _extractResponseDetail(body: any): string {
+    if (body && typeof body === 'object') {
+        const detail = body.detail || body.error || body.message;
+        if (typeof detail === 'string' && detail.trim()) return detail.trim();
+    }
+    if (typeof body === 'string' && body.trim()) return body.trim();
+    return JSON.stringify(body);
+}
+
+function _isPipelineBootstrapError(detailRaw: unknown): boolean {
+    const detail = String(detailRaw || '').trim().toLowerCase();
+    if (!detail) return false;
+    return detail.includes('pipeline models are not loaded')
+        || detail.includes('refresh from s3 first')
+        || detail.includes('no detector model found locally')
+        || detail.includes('no bill reader model found locally')
+        || detail.includes('no coin classifier model found locally');
+}
+
 function _topPredictionConfidence(classification: any): number {
     return Number(classification?.result?.top_predictions?.[0]?.confidence || 0);
 }
@@ -463,9 +501,21 @@ export default function InferenceScreen() {
         lastStableResult: null,
     });
 
+    const apiBaseUrl = useMemo(
+        () => settings.apiBaseUrl.replace(/\/$/, ''),
+        [settings.apiBaseUrl],
+    );
     const inferUrl = useMemo(
-        () => settings.apiBaseUrl.replace(/\/$/, '') + '/api/pipeline/infer',
-        [settings.apiBaseUrl]
+        () => apiBaseUrl + '/api/pipeline/infer',
+        [apiBaseUrl],
+    );
+    const pipelineAutoSelectUrl = useMemo(
+        () => apiBaseUrl + '/api/pipeline/auto_select',
+        [apiBaseUrl],
+    );
+    const pipelineRefreshUrl = useMemo(
+        () => apiBaseUrl + '/api/pipeline/refresh',
+        [apiBaseUrl],
     );
     const selectedDemoScenario = useMemo(() => getDemoScenario(settings.demoFlowMode), [settings.demoFlowMode]);
     const activeDemoScenario = useMemo(() => getDemoScenario(activeDemoMode), [activeDemoMode]);
@@ -693,28 +743,86 @@ export default function InferenceScreen() {
         setImageUri(picked.assets[0].uri);
     }
 
+    const buildInferRequestBody = useCallback((base: FormData) => {
+        const next = _cloneFormData(base);
+        next.append('spoof_guard_enabled', settings.screenSpoofGuardEnabled ? 'true' : 'false');
+        next.append('detector_conf_threshold', detectorConfidenceThreshold.toFixed(2));
+        next.append('classifier_conf_threshold', classifierConfidenceThreshold.toFixed(2));
+        return next;
+    }, [
+        classifierConfidenceThreshold,
+        detectorConfidenceThreshold,
+        settings.screenSpoofGuardEnabled,
+    ]);
+
+    const requestPipelineBootstrap = useCallback(async (): Promise<string | null> => {
+        async function post(url: string) {
+            const response = await fetch(url, { method: 'POST' });
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+            const body = contentType.includes('application/json') ? await response.json() : await response.text();
+            return {
+                ok: response.ok,
+                detail: _extractResponseDetail(body),
+            };
+        }
+
+        const autoSelect = await post(pipelineAutoSelectUrl);
+        if (autoSelect.ok) return null;
+
+        const refresh = await post(pipelineRefreshUrl);
+        if (!refresh.ok) {
+            return refresh.detail || autoSelect.detail;
+        }
+
+        const retryAutoSelect = await post(pipelineAutoSelectUrl);
+        if (retryAutoSelect.ok) return null;
+
+        return retryAutoSelect.detail || refresh.detail || autoSelect.detail;
+    }, [pipelineAutoSelectUrl, pipelineRefreshUrl]);
+
+    const fetchInferBody = useCallback(async (base: FormData): Promise<PipelineResponse> => {
+        const response = await fetch(inferUrl, {
+            method: 'POST',
+            body: buildInferRequestBody(base),
+        });
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const body = contentType.includes('application/json') ? await response.json() : await response.text();
+        if (!response.ok) {
+            throw new Error(_extractResponseDetail(body));
+        }
+        return body as PipelineResponse;
+    }, [buildInferRequestBody, inferUrl]);
+
     async function runInferWithFormData(
         fd: FormData,
         uri: string | null,
         opts?: { skipHistory?: boolean; isLive?: boolean },
     ) {
-        fd.append('spoof_guard_enabled', settings.screenSpoofGuardEnabled ? 'true' : 'false');
-        fd.append('detector_conf_threshold', detectorConfidenceThreshold.toFixed(2));
-        fd.append('classifier_conf_threshold', classifierConfidenceThreshold.toFixed(2));
         const skipHistory = Boolean(opts?.skipHistory);
         const isLive = Boolean(opts?.isLive);
+        const requestBase = _cloneFormData(fd);
         setBusy(true);
         const t0 = Date.now();
         let res: PipelineResponse | null = null;
         let ms: number | null = null;
         try {
-            const response = await fetch(inferUrl, { method: 'POST', body: fd });
-            const contentType = (response.headers.get('content-type') || '').toLowerCase();
-            const body = contentType.includes('application/json') ? await response.json() : await response.text();
-            if (!response.ok) {
-                const detail = (body && (body.detail || body.error)) || JSON.stringify(body);
-                throw new Error(detail);
+            let body: PipelineResponse;
+
+            try {
+                body = await fetchInferBody(requestBase);
+            } catch (error: any) {
+                const detail = error?.message || String(error);
+                if (!_isPipelineBootstrapError(detail)) {
+                    throw error;
+                }
+
+                const bootstrapError = await requestPipelineBootstrap();
+                if (bootstrapError) {
+                    throw new Error(bootstrapError || detail);
+                }
+                body = await fetchInferBody(requestBase);
             }
+
             res = _applyAppThresholds(
                 body as PipelineResponse,
                 detectorConfidenceThreshold,

@@ -34,6 +34,39 @@ function _hasCapturableFrame(video: HTMLVideoElement | null): video is HTMLVideo
         && !video.ended;
 }
 
+function _buildVideoConstraintCandidates(facing: 'front' | 'back'): Array<MediaTrackConstraints | boolean> {
+    const preferredFacingMode = facing === 'back' ? 'environment' : 'user';
+    const fallbackFacingMode = facing === 'back' ? 'user' : 'environment';
+
+    return [
+        {
+            facingMode: { ideal: preferredFacingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+        },
+        { facingMode: { ideal: preferredFacingMode } },
+        { facingMode: preferredFacingMode },
+        { facingMode: { ideal: fallbackFacingMode } },
+        true,
+    ];
+}
+
+function _describeCameraError(error: any): string {
+    const name = String(error?.name || '').trim();
+    const message = String(error?.message || '').trim();
+
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        return 'Camera permission denied';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        return 'No camera was found on this device';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError') {
+        return 'Camera is already in use by another app';
+    }
+    return message || 'Camera access failed';
+}
+
 export type WebLiveCameraRef = {
     /** Capture the current video frame as a JPEG Blob. */
     captureFrameBlob: () => Promise<Blob | null>;
@@ -107,6 +140,10 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
         const video = document.createElement('video');
         video.playsInline = true;
         video.muted = true;
+        video.autoplay = true;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('muted', 'true');
+        video.setAttribute('autoplay', 'true');
         Object.assign(video.style, {
             position: 'absolute',
             top: '0',
@@ -219,6 +256,84 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
         [],
     );
 
+    const startVideoPlayback = useCallback(
+        (video: HTMLVideoElement, session: number, timeoutMs = 4000): Promise<boolean> =>
+            new Promise((resolve) => {
+                if (streamSessionRef.current !== session) {
+                    resolve(false);
+                    return;
+                }
+
+                let settled = false;
+                let timeoutId: number | null = null;
+
+                const cleanup = () => {
+                    video.removeEventListener('loadedmetadata', tryPlay);
+                    video.removeEventListener('canplay', tryPlay);
+                    video.removeEventListener('playing', finishSuccess);
+                    video.removeEventListener('error', finishFailure);
+                    if (timeoutId !== null) window.clearTimeout(timeoutId);
+                };
+
+                const finish = (ok: boolean) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    resolve(ok && streamSessionRef.current === session);
+                };
+
+                const finishSuccess = () => finish(true);
+                const finishFailure = () => finish(_hasCapturableFrame(video));
+
+                const tryPlay = () => {
+                    if (settled || streamSessionRef.current !== session) {
+                        finish(false);
+                        return;
+                    }
+
+                    try {
+                        const maybePromise = video.play();
+                        if (maybePromise && typeof maybePromise.then === 'function') {
+                            maybePromise.then(finishSuccess).catch(() => {
+                                // Some mobile browsers reject the first play()
+                                // call before metadata is fully settled.
+                            });
+                        } else if (!video.paused) {
+                            finishSuccess();
+                        }
+                    } catch {
+                        // Retry after the browser emits loadedmetadata/canplay.
+                    }
+                };
+
+                video.addEventListener('loadedmetadata', tryPlay);
+                video.addEventListener('canplay', tryPlay);
+                video.addEventListener('playing', finishSuccess);
+                video.addEventListener('error', finishFailure);
+                timeoutId = window.setTimeout(() => finish(_hasCapturableFrame(video)), timeoutMs);
+                tryPlay();
+            }),
+        [],
+    );
+
+    const requestCameraStream = useCallback(async (): Promise<MediaStream> => {
+        const attempts = _buildVideoConstraintCandidates(facing);
+        let lastError: any = null;
+
+        for (const videoConstraints of attempts) {
+            try {
+                return await navigator.mediaDevices.getUserMedia({
+                    video: videoConstraints,
+                    audio: false,
+                });
+            } catch (error: any) {
+                lastError = error;
+            }
+        }
+
+        throw lastError || new Error('Camera access failed');
+    }, [facing]);
+
     async function _startStream() {
         _stopStream();
         const session = streamSessionRef.current;
@@ -226,15 +341,7 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
         if (!video) return;
 
         try {
-            const facingMode = facing === 'back' ? 'environment' : 'user';
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: { ideal: facingMode },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                },
-                audio: false,
-            });
+            const stream = await requestCameraStream();
             if (streamSessionRef.current !== session) {
                 stream.getTracks().forEach((track) => track.stop());
                 return;
@@ -244,10 +351,9 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
 
             // Call play() explicitly and swallow AbortError — it means a
             // competing load request fired (harmless: video is already playing).
-            try {
-                await video.play();
-            } catch (e: any) {
-                if (e.name !== 'AbortError') throw e;
+            const startedPlayback = await startVideoPlayback(video, session);
+            if (!startedPlayback && !_hasCapturableFrame(video)) {
+                throw new Error('Failed to load video source');
             }
 
             const frameReady = await waitForCapturableFrame(video, session);
@@ -258,7 +364,7 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
             onStreamReady?.();
         } catch (e: any) {
             if (streamSessionRef.current !== session) return;
-            onError?.(e?.message || 'Camera access failed');
+            onError?.(_describeCameraError(e));
             setReady(false);
         }
     }
@@ -267,7 +373,16 @@ const WebLiveCamera = forwardRef<WebLiveCameraRef, Props>(function WebLiveCamera
         streamSessionRef.current += 1;
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
-        if (videoRef.current) videoRef.current.srcObject = null;
+        if (videoRef.current) {
+            try {
+                videoRef.current.pause();
+            } catch { /* ignore */ }
+            videoRef.current.srcObject = null;
+            videoRef.current.removeAttribute('src');
+            try {
+                videoRef.current.load();
+            } catch { /* ignore */ }
+        }
         setReady(false);
     }
 
