@@ -4,14 +4,28 @@
  */
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { DemoFlowMode } from '../demo/demoFlows';
 
 const STORAGE_KEY = '@smc/settings';
 const SETTINGS_VERSION_KEY = '@smc/settings/version';
-const SETTINGS_SCHEMA_VERSION = 2;
+const SETTINGS_SCHEMA_VERSION = 4;
+const ENV = process.env as Record<string, string | undefined>;
+
+function _defaultApiBaseUrl() {
+    if (ENV.EXPO_PUBLIC_API_BASE_URL) return ENV.EXPO_PUBLIC_API_BASE_URL;
+    if (typeof window === 'undefined') return 'http://127.0.0.1:8080';
+
+    const host = window.location.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return 'http://127.0.0.1:8080';
+    }
+    return window.location.origin;
+}
 
 export type Settings = {
     apiBaseUrl: string;
     confidenceThreshold: number;
+    classifierConfidenceThreshold: number;
     screenSpoofGuardEnabled: boolean;
     cameraResolution: 'low' | 'medium' | 'high';
     liveFps: number;
@@ -24,12 +38,15 @@ export type Settings = {
     highContrast: boolean;
     largeFonts: boolean;
     hapticFeedback: boolean;
+    voiceCommandsEnabled: boolean;
     debugModeEnabled: boolean;
+    demoFlowMode: DemoFlowMode;
 };
 
 const DEFAULT_SETTINGS: Settings = {
-    apiBaseUrl: (process.env.EXPO_PUBLIC_API_BASE_URL as string | undefined) || (typeof window !== 'undefined' ? window.location.origin : 'https://smc.femilawal.com'),
+    apiBaseUrl: _defaultApiBaseUrl(),
     confidenceThreshold: 0.25,
+    classifierConfidenceThreshold: 0.7,
     screenSpoofGuardEnabled: false,
     cameraResolution: 'medium',
     liveFps: 1,
@@ -42,7 +59,9 @@ const DEFAULT_SETTINGS: Settings = {
     highContrast: false,
     largeFonts: false,
     hapticFeedback: true,
+    voiceCommandsEnabled: true,
     debugModeEnabled: false,
+    demoFlowMode: 'off',
 };
 
 type SettingsContextType = {
@@ -123,7 +142,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
     const clearStorage = useCallback(async () => {
         try {
-            await AsyncStorage.multiRemove([STORAGE_KEY, SETTINGS_VERSION_KEY]);
+            await Promise.all([
+                AsyncStorage.removeItem(STORAGE_KEY),
+                AsyncStorage.removeItem(SETTINGS_VERSION_KEY),
+            ]);
             setSettings(DEFAULT_SETTINGS);
         } catch (e) {
             console.warn('[SettingsContext] Failed to clear storage:', e);

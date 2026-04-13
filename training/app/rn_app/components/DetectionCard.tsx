@@ -6,6 +6,7 @@ import { colors, radii, spacing, typography, shadows } from '../theme';
 type Detection = {
     class_id?: number;
     class_name?: string;
+    display_name?: string;
     confidence?: number;
     xyxy?: number[];
     box_area_ratio?: number;
@@ -23,12 +24,15 @@ const CLASS_COLORS: Record<string, string> = {
     CAD_50: '#F59E0B',
     CAD_100: '#EF4444',
     COIN: '#94A3B8',
+    NGN_NOTE: '#DC2626',
+    SCREEN_SPOOF: '#DC2626',
 };
 
 export default function DetectionCard({ detection, index }: Props) {
     const confidence = detection.confidence ?? 0;
     const className = detection.class_name ?? `Class ${detection.class_id ?? '?'}`;
-    const barColor = CLASS_COLORS[className] || colors.primary;
+    const resolvedLabel = detection.display_name ?? className;
+    const barColor = CLASS_COLORS[resolvedLabel] || CLASS_COLORS[className] || colors.primary;
     const pct = Math.round(confidence * 100);
 
     return (
@@ -37,7 +41,7 @@ export default function DetectionCard({ detection, index }: Props) {
                 <View style={[styles.indexBadge, { backgroundColor: barColor }]}>
                     <Text style={styles.indexText}>#{index + 1}</Text>
                 </View>
-                <Text style={styles.className}>{className}</Text>
+                <Text style={styles.className}>{resolvedLabel}</Text>
                 <Text style={[styles.confidence, { color: barColor }]}>{pct}%</Text>
             </View>
 

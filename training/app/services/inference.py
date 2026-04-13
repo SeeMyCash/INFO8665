@@ -4,7 +4,7 @@ Inference logic – classifier + YOLO predictions.
 Stateless functions that accept a model / loaded-instance and an image.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -17,6 +17,15 @@ from app.services.model_manager import LoadedModel, model_state
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+def _resolve_detector_conf_threshold(conf_threshold: Optional[float]) -> float:
+    if conf_threshold is None:
+        return float(settings.detector_conf_threshold)
+    try:
+        return max(0.01, min(0.99, float(conf_threshold)))
+    except Exception:
+        return float(settings.detector_conf_threshold)
 
 
 # ── Classifier (legacy active-model) ────────────────────────
@@ -81,37 +90,47 @@ def predict_classifier_instance(loaded: LoadedModel, image: Image.Image) -> Dict
 
 # ── YOLO detector (legacy active-model) ─────────────────────
 
-def predict_yolo(image: Image.Image) -> Dict[str, Any]:
+def predict_yolo(image: Image.Image, conf_threshold: Optional[float] = None) -> Dict[str, Any]:
     arr = np.array(image.convert("RGB"))
+    effective_conf = _resolve_detector_conf_threshold(conf_threshold)
     result = model_state.loaded_model.predict(
         source=arr,
         verbose=False,
-        conf=settings.detector_conf_threshold,
+        conf=effective_conf,
         iou=settings.detector_iou_threshold,
         max_det=settings.detector_max_det,
     )[0]
 
-    return _parse_yolo_result(result, arr)
+    return _parse_yolo_result(result, arr, conf_threshold=effective_conf)
 
 
 # ── YOLO detector (instance-based) ──────────────────────────
 
-def predict_yolo_instance(loaded: LoadedModel, image: Image.Image) -> Dict[str, Any]:
+def predict_yolo_instance(
+    loaded: LoadedModel,
+    image: Image.Image,
+    conf_threshold: Optional[float] = None,
+) -> Dict[str, Any]:
     arr = np.array(image.convert("RGB"))
+    effective_conf = _resolve_detector_conf_threshold(conf_threshold)
     result = loaded.model.predict(
         source=arr,
         verbose=False,
-        conf=settings.detector_conf_threshold,
+        conf=effective_conf,
         iou=settings.detector_iou_threshold,
         max_det=settings.detector_max_det,
     )[0]
 
-    return _parse_yolo_result(result, arr)
+    return _parse_yolo_result(result, arr, conf_threshold=effective_conf)
 
 
 # ── Shared helpers ───────────────────────────────────────────
 
-def _parse_yolo_result(result: Any, arr: np.ndarray) -> Dict[str, Any]:
+def _parse_yolo_result(
+    result: Any,
+    arr: np.ndarray,
+    conf_threshold: Optional[float] = None,
+) -> Dict[str, Any]:
     boxes = []
     names = result.names if isinstance(result.names, dict) else {}
     img_h, img_w = arr.shape[:2]
@@ -131,15 +150,23 @@ def _parse_yolo_result(result: Any, arr: np.ndarray) -> Dict[str, Any]:
             "xyxy": xyxy,
             "box_area_ratio": area_ratio,
         }
-        if _passes_detection_filters(det, img_w=img_w, img_h=img_h):
+        if _passes_detection_filters(det, img_w=img_w, img_h=img_h, conf_threshold=conf_threshold):
             boxes.append(det)
 
     boxes = _dedupe_detections(boxes)
-    return {"type": "detector", "detections": boxes}
+    return {
+        "type": "detector",
+        "detections": boxes,
+        "image_width": int(img_w),
+        "image_height": int(img_h),
+    }
 
 
 def _passes_detection_filters(
-    det: Dict[str, Any], img_w: int = 1, img_h: int = 1
+    det: Dict[str, Any],
+    img_w: int = 1,
+    img_h: int = 1,
+    conf_threshold: Optional[float] = None,
 ) -> bool:
     try:
         x1, y1, x2, y2 = [float(v) for v in det.get("xyxy", [0, 0, 0, 0])]
@@ -153,7 +180,9 @@ def _passes_detection_filters(
 
     class_name = str(det.get("class_name", "")).strip().lower()
     is_coin = "coin" in class_name
-    min_conf = settings.detector_coin_min_conf if is_coin else settings.detector_bill_min_conf
+    min_conf = (
+        settings.detector_coin_min_conf if is_coin else settings.detector_bill_min_conf
+    ) if conf_threshold is None else _resolve_detector_conf_threshold(conf_threshold)
     if conf < min_conf:
         return False
 

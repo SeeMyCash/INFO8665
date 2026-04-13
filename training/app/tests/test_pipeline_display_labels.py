@@ -23,7 +23,7 @@ def test_pipeline_attaches_classifier_display_labels_to_detections(monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "predict_yolo_instance",
-        lambda loaded, image: {
+        lambda loaded, image, conf_threshold=None: {
             "type": "detector",
             "detections": [
                 {

@@ -140,9 +140,19 @@ def _is_giant_detection(d: Dict[str, Any]) -> bool:
 
 # ── Multi-target ranking ─────────────────────────────────────
 
-def _rank_pipeline_targets(detections: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _rank_pipeline_targets(
+    detections: List[Dict[str, Any]],
+    detector_conf_threshold: Optional[float] = None,
+) -> List[Dict[str, Any]]:
     if not detections:
         return []
+
+    coin_route_min_conf = settings.pipeline_coin_route_min_conf
+    if detector_conf_threshold is not None:
+        try:
+            coin_route_min_conf = max(0.01, min(0.99, float(detector_conf_threshold)))
+        except Exception:
+            coin_route_min_conf = settings.pipeline_coin_route_min_conf
 
     by_conf = sorted(
         ({**dict(d), "_source_index": idx} for idx, d in enumerate(detections)),
@@ -156,14 +166,14 @@ def _rank_pipeline_targets(detections: List[Dict[str, Any]]) -> List[Dict[str, A
         for d in by_conf
         if _is_coin_detection(d)
         and not _is_giant_detection(d)
-        and _detection_score(d) >= settings.pipeline_coin_route_min_conf
+        and _detection_score(d) >= coin_route_min_conf
     ]
     giant_coin_candidates = [
         d
         for d in by_conf
         if _is_coin_detection(d)
         and _is_giant_detection(d)
-        and _detection_score(d) >= settings.pipeline_coin_route_min_conf
+        and _detection_score(d) >= coin_route_min_conf
     ]
 
     ranked: List[Dict[str, Any]] = []
@@ -185,17 +195,22 @@ def _rank_pipeline_targets(detections: List[Dict[str, Any]]) -> List[Dict[str, A
     return [top]
 
 
-def _choose_target(detections: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    ranked = _rank_pipeline_targets(detections)
+def _choose_target(
+    detections: List[Dict[str, Any]],
+    detector_conf_threshold: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    ranked = _rank_pipeline_targets(detections, detector_conf_threshold=detector_conf_threshold)
     if not ranked:
         return None
     return ranked[0]
 
 
 def _choose_targets(
-    detections: List[Dict[str, Any]], top_k_targets: int = 1
+    detections: List[Dict[str, Any]],
+    top_k_targets: int = 1,
+    detector_conf_threshold: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
-    ranked = _rank_pipeline_targets(detections)
+    ranked = _rank_pipeline_targets(detections, detector_conf_threshold=detector_conf_threshold)
     if not ranked:
         return []
     try:
@@ -254,12 +269,30 @@ def _top_prediction_confidence(classification: Optional[Dict[str, Any]]) -> Opti
         return None
 
 
+def _meets_classifier_threshold(
+    classification: Optional[Dict[str, Any]],
+    classifier_conf_threshold: Optional[float],
+) -> bool:
+    if classifier_conf_threshold is None:
+        return True
+    conf = _top_prediction_confidence(classification)
+    if conf is None:
+        return False
+    try:
+        threshold = max(0.01, min(0.99, float(classifier_conf_threshold)))
+    except Exception:
+        return True
+    return conf >= threshold
+
+
 # ── Full pipeline process ────────────────────────────────────
 
 def run_full_process(
     image: Image.Image,
     top_k_targets: int = 1,
     spoof_guard_enabled: Optional[bool] = None,
+    detector_conf_threshold: Optional[float] = None,
+    classifier_conf_threshold: Optional[float] = None,
 ) -> Dict[str, Any]:
     if _pipeline_detector is None or _pipeline_bill_reader is None or _pipeline_coin_classifier is None:
         ensure_pipeline_models(allow_refresh_from_defaults=True)
@@ -280,6 +313,8 @@ def run_full_process(
         "spoof_check": spoof_check,
         "detector": {"type": "detector", "detections": []},
         "requested_top_k_targets": requested_top_k,
+        "requested_detector_conf_threshold": detector_conf_threshold,
+        "requested_classifier_conf_threshold": classifier_conf_threshold,
         "target": None,
         "classification": None,
         "candidates": [],
@@ -293,9 +328,17 @@ def run_full_process(
         )
         return out
 
-    det = predict_yolo_instance(_pipeline_detector, image)  # type: ignore[arg-type]
+    det = predict_yolo_instance(
+        _pipeline_detector,  # type: ignore[arg-type]
+        image,
+        conf_threshold=detector_conf_threshold,
+    )
     detections = det.get("detections", [])
-    targets = _choose_targets(detections, requested_top_k)
+    targets = _choose_targets(
+        detections,
+        requested_top_k,
+        detector_conf_threshold=detector_conf_threshold,
+    )
     target = targets[0] if targets else None
     out["detector"] = det
 
@@ -329,6 +372,7 @@ def run_full_process(
             source_index = candidate.get("_source_index")
             if (
                 label
+                and _meets_classifier_threshold(entry["classification"], classifier_conf_threshold)
                 and isinstance(source_index, int)
                 and 0 <= source_index < len(detections)
             ):

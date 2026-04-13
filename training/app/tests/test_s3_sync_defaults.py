@@ -13,6 +13,7 @@ from app.services import s3_sync
 def test_resolve_artifact_defaults_prefers_deploy_files(monkeypatch):
     monkeypatch.setattr(s3_sync.settings, "artifacts_bucket", "env-bucket")
     monkeypatch.setattr(s3_sync.settings, "artifacts_prefix", "env-prefix")
+    s3_sync.infer_artifacts_bucket_from_aws_identity.cache_clear()
 
     def fake_read(name: str):
         return {
@@ -32,9 +33,34 @@ def test_resolve_artifact_defaults_falls_back_to_settings(monkeypatch):
     monkeypatch.setattr(s3_sync.settings, "artifacts_bucket", "env-bucket")
     monkeypatch.setattr(s3_sync.settings, "artifacts_prefix", "env-prefix")
     monkeypatch.setattr(s3_sync, "read_deploy_text", lambda name: None)
+    s3_sync.infer_artifacts_bucket_from_aws_identity.cache_clear()
 
     assert s3_sync.resolve_artifact_defaults() == {
         "artifacts_bucket": "env-bucket",
+        "artifacts_prefix": "env-prefix",
+    }
+
+
+def test_resolve_artifact_defaults_falls_back_to_aws_identity(monkeypatch):
+    class _FakeStsClient:
+        def get_caller_identity(self):
+            return {"Account": "123456789012"}
+
+    class _FakeBoto3:
+        @staticmethod
+        def client(name: str, region_name: str | None = None):
+            assert name == "sts"
+            return _FakeStsClient()
+
+    monkeypatch.setattr(s3_sync.settings, "artifacts_bucket", None)
+    monkeypatch.setattr(s3_sync.settings, "artifacts_prefix", "env-prefix")
+    monkeypatch.setattr(s3_sync.settings, "enable_aws_model_sync", True)
+    monkeypatch.setattr(s3_sync, "read_deploy_text", lambda name: None)
+    monkeypatch.setattr(s3_sync, "boto3", _FakeBoto3())
+    s3_sync.infer_artifacts_bucket_from_aws_identity.cache_clear()
+
+    assert s3_sync.resolve_artifact_defaults() == {
+        "artifacts_bucket": "smc-phase2-artifacts-123456789012",
         "artifacts_prefix": "env-prefix",
     }
 

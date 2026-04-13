@@ -7,7 +7,10 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:web": "expo export --platform web --output-dir dist",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
@@ -30,7 +33,9 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.7",
+    "@playwright/test": "^1.54.2",
     "@types/react": "^18.3.28",
+    "http-server": "^14.1.1",
     "typescript": "^5.5.4"
   }
 }

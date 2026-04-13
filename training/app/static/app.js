@@ -9,6 +9,7 @@ const modelSummary = document.getElementById('modelSummary');
 const video = document.getElementById('video');
 let captureCanvas = document.getElementById('captureCanvas');
 let videoOverlay = document.getElementById('videoOverlay');
+let liveBadge = document.querySelector('.live-badge');
 let uploadPreview = document.getElementById('uploadPreview');
 let uploadOverlay = document.getElementById('uploadOverlay');
 const refreshBtn = document.getElementById('refreshBtn');
@@ -24,6 +25,10 @@ let liveTimer = null;
 let cameraStream = null;
 let uploadPreviewUrl = null;
 
+// Render loop state — decoupled from inference timing
+let lastDetections = [];
+let renderLoopId = null;
+
 function ensureUiElements() {
   if (!video) return;
 
@@ -35,6 +40,14 @@ function ensureUiElements() {
     overlay.className = 'hidden';
     videoWrap.appendChild(overlay);
     videoOverlay = overlay;
+  }
+
+  if (!liveBadge && videoWrap) {
+    const badge = document.createElement('span');
+    badge.className = 'live-badge hidden';
+    badge.textContent = '● LIVE';
+    videoWrap.appendChild(badge);
+    liveBadge = badge;
   }
 
   if (!captureCanvas) {
@@ -184,15 +197,39 @@ function clearCanvas(canvasEl) {
   ctx.clearRect(0, 0, canvasEl.width || 0, canvasEl.height || 0);
 }
 
-function renderVideoDetections(detections) {
-  if (!videoOverlay || !video.videoWidth || !video.videoHeight) return;
-  videoOverlay.width = video.videoWidth;
-  videoOverlay.height = video.videoHeight;
-  videoOverlay.classList.remove('hidden');
+// Continuous render loop — draws lastDetections every animation frame so the
+// video stream stays smooth and boxes never flicker from a canvas dimension reset.
+function startRenderLoop() {
+  if (renderLoopId !== null) return;
 
-  const ctx = videoOverlay.getContext('2d');
-  ctx.clearRect(0, 0, videoOverlay.width, videoOverlay.height);
-  drawDetections(ctx, detections || []);
+  function loop() {
+    if (videoOverlay && video.videoWidth && video.videoHeight) {
+      // Only resize the canvas when the video resolution changes (not every inference frame)
+      if (videoOverlay.width !== video.videoWidth || videoOverlay.height !== video.videoHeight) {
+        videoOverlay.width = video.videoWidth;
+        videoOverlay.height = video.videoHeight;
+      }
+      videoOverlay.classList.remove('hidden');
+      const ctx = videoOverlay.getContext('2d');
+      ctx.clearRect(0, 0, videoOverlay.width, videoOverlay.height);
+      drawDetections(ctx, lastDetections);
+    }
+    renderLoopId = requestAnimationFrame(loop);
+  }
+
+  renderLoopId = requestAnimationFrame(loop);
+}
+
+function stopRenderLoop() {
+  if (renderLoopId !== null) {
+    cancelAnimationFrame(renderLoopId);
+    renderLoopId = null;
+  }
+  lastDetections = [];
+  if (videoOverlay) {
+    clearCanvas(videoOverlay);
+    videoOverlay.classList.add('hidden');
+  }
 }
 
 function renderUploadDetections(resultData) {
@@ -262,7 +299,7 @@ async function activateModel() {
   await loadModels();
 
   if (data.kind !== 'detector') {
-    clearCanvas(videoOverlay);
+    lastDetections = [];
     if (uploadOverlay) uploadOverlay.classList.add('hidden');
   }
 }
@@ -310,12 +347,20 @@ async function inferUpload() {
 }
 
 async function startCamera() {
-  if (cameraStream) {
-    return;
-  }
+  if (cameraStream) return;
 
   cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
   video.srcObject = cameraStream;
+
+  // Explicitly call play() and handle AbortError — avoids the
+  // "play() interrupted because media was removed" console error that
+  // occurs when autoplay races with page/DOM changes.
+  try {
+    await video.play();
+  } catch (e) {
+    if (e.name !== 'AbortError') throw e;
+    // AbortError here means the browser already started playing — safe to ignore
+  }
 
   await new Promise((resolve) => {
     if (video.videoWidth && video.videoHeight) {
@@ -325,11 +370,14 @@ async function startCamera() {
     video.onloadedmetadata = () => resolve();
   });
 
+  // Size the overlay canvas once so the render loop never needs to reset it
   if (videoOverlay) {
     videoOverlay.width = video.videoWidth;
     videoOverlay.height = video.videoHeight;
     videoOverlay.classList.remove('hidden');
   }
+
+  startRenderLoop();
   syncCameraControls();
 }
 
@@ -337,8 +385,11 @@ function stopCamera() {
   if (liveTimer) {
     clearInterval(liveTimer);
     liveTimer = null;
-    toggleLiveBtn.textContent = 'Start Live (1 fps)';
+    toggleLiveBtn.textContent = 'Go Live';
+    if (liveBadge) liveBadge.classList.add('hidden');
   }
+
+  stopRenderLoop();
 
   if (cameraStream) {
     for (const track of cameraStream.getTracks()) {
@@ -348,8 +399,6 @@ function stopCamera() {
   }
 
   video.srcObject = null;
-  clearCanvas(videoOverlay);
-  if (videoOverlay) videoOverlay.classList.add('hidden');
   syncCameraControls();
   setStatus('Camera stopped', 'neutral');
 }
@@ -366,12 +415,8 @@ async function captureAndInfer() {
   const blob = await new Promise(resolve => captureCanvas.toBlob(resolve, 'image/jpeg', 0.9));
   const data = await inferBlob(blob);
 
-  const detections = getDetections(data);
-  if (detections.length > 0) {
-    renderVideoDetections(detections);
-  } else {
-    clearCanvas(videoOverlay);
-  }
+  // Update detection state — the render loop picks this up on the next animation frame
+  lastDetections = getDetections(data);
 }
 
 function toggleLive() {
@@ -383,18 +428,23 @@ function toggleLive() {
   if (liveTimer) {
     clearInterval(liveTimer);
     liveTimer = null;
-    toggleLiveBtn.textContent = 'Start Live (1 fps)';
-    setStatus('Live capture stopped', 'neutral');
+    lastDetections = [];
+    toggleLiveBtn.textContent = 'Go Live';
+    if (liveBadge) liveBadge.classList.add('hidden');
+    setStatus('Live stopped', 'neutral');
     return;
   }
+
   liveTimer = setInterval(() => {
     captureAndInfer().catch(err => {
       setStatus(err.message, 'error');
       showResult({ error: err.message });
     });
   }, 1000);
+
   toggleLiveBtn.textContent = 'Stop Live';
-  setStatus('Live capture started (1 fps)', 'working');
+  if (liveBadge) liveBadge.classList.remove('hidden');
+  setStatus('Live inference running (1 fps)', 'working');
 }
 
 refreshBtn.addEventListener('click', () => runAction('Refreshing models', refreshModels));

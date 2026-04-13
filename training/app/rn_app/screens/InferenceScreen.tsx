@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     AccessibilityInfo,
     ActivityIndicator,
     Image,
+    LayoutChangeEvent,
     Platform,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
+    Vibration,
     View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,7 +23,9 @@ import WebLiveCamera, { WebLiveCameraRef } from '../components/WebLiveCamera';
 import ImageWithOverlay from '../components/ImageWithOverlay';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../contexts/HistoryContext';
+import { useCameraCommand } from '../contexts/CameraCommandContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { getDemoScenario, type DemoFlowMode } from '../demo/demoFlows';
 import { spacing, radii, shadows } from '../theme';
 
 type PipelineResponse = {
@@ -63,7 +68,8 @@ const DENOM_ALIASES: Record<string, string> = {
     CAD_01: 'CAD_0_01',
     CAD_05: 'CAD_0_05',
 };
-const GUARANTEED_CLASSIFIER_MIN_CONF = 0.70;
+const DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD = 0.70;
+const DEFAULT_DETECTOR_CONFIDENCE_THRESHOLD = 0.25;
 
 const LIVE_STABILITY_DEFAULT_WINDOW_MS = 3000;
 const LIVE_STABILITY_DEFAULT_MIN_FRAMES = 3;
@@ -72,6 +78,27 @@ const LIVE_STABILITY_HOLD_MS = 1200;
 const LIVE_TOP_K_TARGETS = 5;
 const STILL_TOP_K_TARGETS = 5;
 const DISPLAY_MAX_DETECTIONS = 5;
+const LIVE_FPS_DEFAULT = 1;
+const LIVE_FPS_MAX = 8;
+const LIVE_MIN_INTERVAL_MS = 100;
+const ANNOUNCE_HOLD_MS = 1500;       // pause after TTS resolves before resuming
+const RESUME_LABEL_MS = 1000;        // how long "Resuming…" label shows
+const NO_DETECTION_TIMEOUT_MS = 10000; // announce "nothing found" after this long without a stable hit
+
+const DETECTION_COLORS: Record<string, string> = {
+    CAD_5: '#3B82F6',
+    CAD_10: '#8B5CF6',
+    CAD_20: '#10B981',
+    CAD_50: '#F59E0B',
+    CAD_100: '#EF4444',
+    COIN: '#94A3B8',
+    LOONIE: '#22C55E',
+    TOONIE: '#EAB308',
+    NICKEL: '#60A5FA',
+    DIME: '#A78BFA',
+    QUARTER: '#F97316',
+    SCREEN_SPOOF: '#DC2626',
+};
 
 type StableTarget = {
     className: string;
@@ -229,6 +256,14 @@ function _computeGuaranteedClassifierSummary(res: PipelineResponse | null): {
     items: Array<{ rank: number; className: string; value: number; confidence: number }>;
     thresholdPct: number;
 } {
+    return _computeGuaranteedClassifierSummaryWithThreshold(res, DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD);
+}
+
+function _computeGuaranteedClassifierSummaryWithThreshold(res: PipelineResponse | null, minConfidence: number): {
+    total: number;
+    items: Array<{ rank: number; className: string; value: number; confidence: number }>;
+    thresholdPct: number;
+} {
     const candidates = Array.isArray(res?.result?.candidates) ? res.result.candidates : [];
     const fallback = res?.result?.classification
         ? [{ rank: 1, classification: res.result.classification }]
@@ -240,7 +275,7 @@ function _computeGuaranteedClassifierSummary(res: PipelineResponse | null): {
             const top1 = cand?.classification?.result?.top_predictions?.[0];
             if (!top1) return null;
             const confidence = Number(top1?.confidence || 0);
-            if (confidence < GUARANTEED_CLASSIFIER_MIN_CONF) return null;
+            if (confidence < minConfidence) return null;
             const classNameRaw = String(top1?.class || '').trim();
             const className = _normalizeCurrencyClassName(classNameRaw) || classNameRaw;
             const value = _classToCadValue(className);
@@ -258,9 +293,142 @@ function _computeGuaranteedClassifierSummary(res: PipelineResponse | null): {
     return {
         total,
         items,
-        thresholdPct: Math.round(GUARANTEED_CLASSIFIER_MIN_CONF * 100),
+        thresholdPct: Math.round(minConfidence * 100),
     };
 }
+
+function _sanitizeThreshold(raw: unknown, fallback: number): number {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return fallback;
+    return Math.max(0.01, Math.min(0.99, value));
+}
+
+function _cloneFormData(fd: FormData): FormData {
+    const next = new FormData();
+    const anyFd = fd as any;
+
+    if (typeof anyFd.forEach === 'function') {
+        anyFd.forEach((value: any, key: string) => {
+            next.append(key, value);
+        });
+        return next;
+    }
+
+    const parts = Array.isArray(anyFd._parts) ? anyFd._parts : [];
+    for (const entry of parts) {
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        next.append(entry[0], entry[1]);
+    }
+    return next;
+}
+
+function _extractResponseDetail(body: any): string {
+    if (body && typeof body === 'object') {
+        const detail = body.detail || body.error || body.message;
+        if (typeof detail === 'string' && detail.trim()) return detail.trim();
+    }
+    if (typeof body === 'string' && body.trim()) return body.trim();
+    return JSON.stringify(body);
+}
+
+function _isPipelineBootstrapError(detailRaw: unknown): boolean {
+    const detail = String(detailRaw || '').trim().toLowerCase();
+    if (!detail) return false;
+    return detail.includes('pipeline models are not loaded')
+        || detail.includes('refresh from s3 first')
+        || detail.includes('no detector model found locally')
+        || detail.includes('no bill reader model found locally')
+        || detail.includes('no coin classifier model found locally');
+}
+
+function _topPredictionConfidence(classification: any): number {
+    return Number(classification?.result?.top_predictions?.[0]?.confidence || 0);
+}
+
+function _applyAppThresholds(
+    res: PipelineResponse,
+    detectorThreshold: number,
+    classifierThreshold: number,
+): PipelineResponse {
+    if (!res?.result || !res.result.detector) return res;
+
+    const next: PipelineResponse = {
+        ...res,
+        result: {
+            ...res.result,
+            detector: {
+                ...res.result.detector,
+            },
+        },
+    };
+
+    const filteredDetections = _extractDetections(res)
+        .filter((det: any) => Number(det?.confidence || 0) >= detectorThreshold)
+        .map((det: any) => {
+            const cloned = { ...det };
+            const displayConfidence = Number(cloned.display_confidence || 0);
+            if (cloned.display_name && displayConfidence > 0 && displayConfidence < classifierThreshold) {
+                delete cloned.display_name;
+                delete cloned.display_confidence;
+            }
+            return cloned;
+        });
+
+    next.result.detector = {
+        ...next.result.detector,
+        detections: filteredDetections,
+    };
+
+    const rawCandidates = Array.isArray(res.result.candidates) ? res.result.candidates : [];
+    const nextCandidates = rawCandidates
+        .filter((candidate: any) => Number(candidate?.target?.confidence || 0) >= detectorThreshold)
+        .map((candidate: any) => {
+            const nextCandidate = { ...candidate };
+            if (_topPredictionConfidence(nextCandidate.classification) < classifierThreshold) {
+                nextCandidate.classification = null;
+            }
+            return nextCandidate;
+        });
+
+    next.result.candidates = nextCandidates;
+    next.result.target = Number(res.result?.target?.confidence || 0) >= detectorThreshold
+        ? res.result.target
+        : null;
+    next.result.classification = next.result.target && _topPredictionConfidence(res.result.classification) >= classifierThreshold
+        ? res.result.classification
+        : null;
+
+    return next;
+}
+
+function _getDetectorImageSize(res: PipelineResponse | null): { width: number; height: number } | null {
+    const width = Number(res?.result?.detector?.image_width || 0);
+    const height = Number(res?.result?.detector?.image_height || 0);
+    if (!(width > 0) || !(height > 0)) return null;
+    return { width, height };
+}
+
+function _getDetectionColor(det: any): string {
+    const tag = String(det?.display_name || det?.class_name || '').trim().toUpperCase();
+    const fallback = String(det?.class_name || '').trim().toUpperCase();
+    return DETECTION_COLORS[tag] || DETECTION_COLORS[fallback] || '#A78BFA';
+}
+
+function _buildLiveAnnouncementText(res: PipelineResponse, classifierConfidenceThreshold: number): string {
+    const dets = _extractDetections(res);
+    const coinCount = dets.filter((d: any) => _isCoinClassName(d?.class_name)).length;
+    const billCount = Math.max(0, dets.length - coinCount);
+    const summary = _computeGuaranteedClassifierSummaryWithThreshold(res, classifierConfidenceThreshold);
+    const guaranteedTotal = Number(summary.total || 0);
+    if (billCount === 0 && coinCount === 0) return 'No bills or coins detected.';
+    const parts: string[] = [];
+    if (billCount > 0) parts.push(`${billCount} bill${billCount === 1 ? '' : 's'}`);
+    if (coinCount > 0) parts.push(`${coinCount} coin${coinCount === 1 ? '' : 's'}`);
+    const countLine = `Detected ${parts.join(' and ')}.`;
+    return guaranteedTotal > 0 ? `${countLine} Total: ${_toCadSpeech(guaranteedTotal)}.` : countLine;
+}
+
+type LivePhase = 'idle' | 'scanning' | 'announcing' | 'holding' | 'resuming';
 
 /* ── Main screen ───────────────────────────── */
 export default function InferenceScreen() {
@@ -279,25 +447,50 @@ export default function InferenceScreen() {
         0.95,
         Math.max(0.10, Number(settings.liveStabilityIou) || LIVE_STABILITY_DEFAULT_IOU_THRESHOLD),
     );
+    const detectorConfidenceThreshold = _sanitizeThreshold(
+        settings.confidenceThreshold,
+        DEFAULT_DETECTOR_CONFIDENCE_THRESHOLD,
+    );
+    const classifierConfidenceThreshold = _sanitizeThreshold(
+        settings.classifierConfidenceThreshold,
+        DEFAULT_CLASSIFIER_CONFIDENCE_THRESHOLD,
+    );
+    const liveFps = Math.max(
+        1,
+        Math.min(LIVE_FPS_MAX, Math.round(Number(settings.liveFps) || LIVE_FPS_DEFAULT)),
+    );
 
     const [imageUri, setImageUri] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [result, setResult] = useState<PipelineResponse | null>(null);
     const [livePreviewResult, setLivePreviewResult] = useState<PipelineResponse | null>(null);
     const [cameraActive, setCameraActive] = useState(false);
+    const cameraActiveRef = useRef(false);
     const [liveRunning, setLiveRunning] = useState(false);
     const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
     const [permission, requestPermission] = useCameraPermissions();
     const [timing, setTiming] = useState<number | null>(null);
+    const [activeDemoMode, setActiveDemoMode] = useState<DemoFlowMode>('off');
+    const [voiceTranscript, setVoiceTranscript] = useState('');
+    const [cameraViewportSize, setCameraViewportSize] = useState({ width: 0, height: 300 });
     const [liveStability, setLiveStability] = useState<LiveStabilityStatus>({
         ...LIVE_STABILITY_IDLE,
         remainingMs: liveStabilityWindowMs,
     });
 
+    const [livePhase, setLivePhase] = useState<LivePhase>('idle');
+    const livePhaseRef = useRef<LivePhase>('idle');
+    const { pendingCommand, clear: clearPendingCommand } = useCameraCommand();
+    const wantsLiveAfterCameraStart = useRef(false);
+    const wantsSnapAfterCameraStart = useRef(false);
+
     const cameraRef = useRef<CameraView | null>(null);
     const webCamRef = useRef<WebLiveCameraRef>(null);
     const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const liveRunningRef = useRef(false);
+    const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastStableAcceptedRef = useRef<{ result: PipelineResponse; ms: number } | null>(null);
+    const noDetectionSinceRef = useRef<number>(0);
     const lastAnnouncementKeyRef = useRef<string>('');
     const lastAnnouncementAtRef = useRef<number>(0);
     const liveStabilityRef = useRef<LiveStabilityRefState>({
@@ -308,10 +501,24 @@ export default function InferenceScreen() {
         lastStableResult: null,
     });
 
-    const inferUrl = useMemo(
-        () => settings.apiBaseUrl.replace(/\/$/, '') + '/api/pipeline/infer',
-        [settings.apiBaseUrl]
+    const apiBaseUrl = useMemo(
+        () => settings.apiBaseUrl.replace(/\/$/, ''),
+        [settings.apiBaseUrl],
     );
+    const inferUrl = useMemo(
+        () => apiBaseUrl + '/api/pipeline/infer',
+        [apiBaseUrl],
+    );
+    const pipelineAutoSelectUrl = useMemo(
+        () => apiBaseUrl + '/api/pipeline/auto_select',
+        [apiBaseUrl],
+    );
+    const pipelineRefreshUrl = useMemo(
+        () => apiBaseUrl + '/api/pipeline/refresh',
+        [apiBaseUrl],
+    );
+    const selectedDemoScenario = useMemo(() => getDemoScenario(settings.demoFlowMode), [settings.demoFlowMode]);
+    const activeDemoScenario = useMemo(() => getDemoScenario(activeDemoMode), [activeDemoMode]);
 
     const effectiveResult = useMemo(
         () => (liveRunning ? (livePreviewResult || result) : result),
@@ -333,34 +540,80 @@ export default function InferenceScreen() {
         () => (Array.isArray(result?.result?.candidates) ? result?.result?.candidates : []),
         [result],
     );
-    const guaranteedClassifierSummary = useMemo(() => _computeGuaranteedClassifierSummary(result), [result]);
+    const guaranteedClassifierSummary = useMemo(
+        () => _computeGuaranteedClassifierSummaryWithThreshold(result, classifierConfidenceThreshold),
+        [classifierConfidenceThreshold, result],
+    );
+    const detectorImageSize = useMemo(() => _getDetectorImageSize(effectiveResult), [effectiveResult]);
 
     const speakAnnouncement = useCallback((text: string) => {
         const msg = String(text || '').trim();
         if (!msg) return;
-
+        setVoiceTranscript(msg);
         if (Platform.OS === 'web') {
             const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
             if (synth) {
-                try {
-                    synth.cancel();
-                    const utterance = new SpeechSynthesisUtterance(msg);
-                    utterance.rate = Math.max(0.5, Math.min(2.0, Number(settings.ttsSpeed || 1)));
-                    synth.speak(utterance);
-                    return;
-                } catch {
-                    // Fall through to accessibility announce.
-                }
+                try { synth.cancel(); const u = new SpeechSynthesisUtterance(msg); u.rate = Math.max(0.5, Math.min(2.0, Number(settings.ttsSpeed || 1))); synth.speak(u); return; } catch { /* fall through */ }
             }
         }
-
         AccessibilityInfo.announceForAccessibility(msg);
     }, [settings.ttsSpeed]);
+
+    // speakWithCallback: like speakAnnouncement but calls onDone when TTS finishes.
+    // Used by the live announce-resume cycle so we know exactly when to start the hold timer.
+    function speakWithCallback(text: string, onDone: () => void) {
+        const msg = String(text || '').trim();
+        setVoiceTranscript(msg);
+        if (!msg) { onDone(); return; }
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            const synth = window.speechSynthesis;
+            if (synth) {
+                synth.cancel();
+                const utterance = new SpeechSynthesisUtterance(msg);
+                utterance.rate = Math.max(0.5, Math.min(2.0, Number(settings.ttsSpeed || 1)));
+                utterance.onend = () => onDone();
+                utterance.onerror = () => onDone();
+                synth.speak(utterance);
+                return;
+            }
+        }
+        AccessibilityInfo.announceForAccessibility(msg);
+        // Estimate duration for native (no completion event available)
+        const words = msg.split(/\s+/).length;
+        const rate = Math.max(0.5, Math.min(2.0, Number(settings.ttsSpeed || 1)));
+        setTimeout(onDone, Math.max(1500, Math.ceil(words / 2.5 / rate) * 1000));
+    }
+
+    function playEarcon(type: 'found' | 'none' = 'found') {
+        if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+        try {
+            const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx() as AudioContext;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'sine';
+            if (type === 'found') {
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.09);
+            } else {
+                osc.frequency.setValueAtTime(440, ctx.currentTime);
+            }
+            gain.gain.setValueAtTime(0.25, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+            osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.2);
+            setTimeout(() => ctx.close(), 500);
+        } catch { /* ignore — AudioContext unavailable */ }
+    }
 
     const recordHistory = useCallback(
         (res: PipelineResponse | null, ms: number | null, uri: string | null) => {
             const dets = res?.result?.detector?.detections || res?.result?.detections || [];
-            const guaranteedTotal = _computeGuaranteedClassifierSummary(res).total;
+            const guaranteedTotal = _computeGuaranteedClassifierSummaryWithThreshold(
+                res,
+                classifierConfidenceThreshold,
+            ).total;
             addHistory({
                 imageUri: uri,
                 detections: dets,
@@ -370,7 +623,7 @@ export default function InferenceScreen() {
                 error: res?.error || null,
             });
         },
-        [addHistory]
+        [addHistory, classifierConfidenceThreshold]
     );
 
     const resetLiveStability = useCallback(() => {
@@ -386,6 +639,33 @@ export default function InferenceScreen() {
             remainingMs: liveStabilityWindowMs,
         });
     }, [liveStabilityWindowMs]);
+
+    const resetAnnouncementWindow = useCallback(() => {
+        lastAnnouncementKeyRef.current = '';
+        lastAnnouncementAtRef.current = 0;
+    }, []);
+
+    const applyDemoScenario = useCallback((mode: Exclude<DemoFlowMode, 'off'>) => {
+        const scenario = getDemoScenario(mode);
+        if (!scenario) return;
+
+        if (liveTimerRef.current) {
+            clearTimeout(liveTimerRef.current);
+            liveTimerRef.current = null;
+        }
+
+        setBusy(false);
+        setLiveRunning(false);
+        liveRunningRef.current = false;
+        setLivePreviewResult(null);
+        setImageUri(null);
+        setTiming(0);
+        setVoiceTranscript('');
+        resetAnnouncementWindow();
+        resetLiveStability();
+        setActiveDemoMode(mode);
+        setResult(scenario.result);
+    }, [resetAnnouncementWindow, resetLiveStability]);
 
     const applyLiveStability = useCallback((res: PipelineResponse) => {
         const now = Date.now();
@@ -463,27 +743,91 @@ export default function InferenceScreen() {
         setImageUri(picked.assets[0].uri);
     }
 
+    const buildInferRequestBody = useCallback((base: FormData) => {
+        const next = _cloneFormData(base);
+        next.append('spoof_guard_enabled', settings.screenSpoofGuardEnabled ? 'true' : 'false');
+        next.append('detector_conf_threshold', detectorConfidenceThreshold.toFixed(2));
+        next.append('classifier_conf_threshold', classifierConfidenceThreshold.toFixed(2));
+        return next;
+    }, [
+        classifierConfidenceThreshold,
+        detectorConfidenceThreshold,
+        settings.screenSpoofGuardEnabled,
+    ]);
+
+    const requestPipelineBootstrap = useCallback(async (): Promise<string | null> => {
+        async function post(url: string) {
+            const response = await fetch(url, { method: 'POST' });
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+            const body = contentType.includes('application/json') ? await response.json() : await response.text();
+            return {
+                ok: response.ok,
+                detail: _extractResponseDetail(body),
+            };
+        }
+
+        const autoSelect = await post(pipelineAutoSelectUrl);
+        if (autoSelect.ok) return null;
+
+        const refresh = await post(pipelineRefreshUrl);
+        if (!refresh.ok) {
+            return refresh.detail || autoSelect.detail;
+        }
+
+        const retryAutoSelect = await post(pipelineAutoSelectUrl);
+        if (retryAutoSelect.ok) return null;
+
+        return retryAutoSelect.detail || refresh.detail || autoSelect.detail;
+    }, [pipelineAutoSelectUrl, pipelineRefreshUrl]);
+
+    const fetchInferBody = useCallback(async (base: FormData): Promise<PipelineResponse> => {
+        const response = await fetch(inferUrl, {
+            method: 'POST',
+            body: buildInferRequestBody(base),
+        });
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        const body = contentType.includes('application/json') ? await response.json() : await response.text();
+        if (!response.ok) {
+            throw new Error(_extractResponseDetail(body));
+        }
+        return body as PipelineResponse;
+    }, [buildInferRequestBody, inferUrl]);
+
     async function runInferWithFormData(
         fd: FormData,
         uri: string | null,
         opts?: { skipHistory?: boolean; isLive?: boolean },
     ) {
-        fd.append('spoof_guard_enabled', settings.screenSpoofGuardEnabled ? 'true' : 'false');
         const skipHistory = Boolean(opts?.skipHistory);
         const isLive = Boolean(opts?.isLive);
+        const requestBase = _cloneFormData(fd);
         setBusy(true);
         const t0 = Date.now();
         let res: PipelineResponse | null = null;
         let ms: number | null = null;
         try {
-            const response = await fetch(inferUrl, { method: 'POST', body: fd });
-            const contentType = (response.headers.get('content-type') || '').toLowerCase();
-            const body = contentType.includes('application/json') ? await response.json() : await response.text();
-            if (!response.ok) {
-                const detail = (body && (body.detail || body.error)) || JSON.stringify(body);
-                throw new Error(detail);
+            let body: PipelineResponse;
+
+            try {
+                body = await fetchInferBody(requestBase);
+            } catch (error: any) {
+                const detail = error?.message || String(error);
+                if (!_isPipelineBootstrapError(detail)) {
+                    throw error;
+                }
+
+                const bootstrapError = await requestPipelineBootstrap();
+                if (bootstrapError) {
+                    throw new Error(bootstrapError || detail);
+                }
+                body = await fetchInferBody(requestBase);
             }
-            res = body as PipelineResponse;
+
+            res = _applyAppThresholds(
+                body as PipelineResponse,
+                detectorConfidenceThreshold,
+                classifierConfidenceThreshold,
+            );
             ms = Date.now() - t0;
             if (isLive) {
                 setLivePreviewResult(res);
@@ -493,6 +837,9 @@ export default function InferenceScreen() {
                 }
                 if (stable.accepted) {
                     setTiming(ms);
+                    // Signal to _runLiveIteration that a stable result is ready.
+                    // The iteration will handle the announce-resume cycle.
+                    lastStableAcceptedRef.current = { result: res, ms: ms! };
                 }
             } else {
                 setLivePreviewResult(null);
@@ -532,6 +879,9 @@ export default function InferenceScreen() {
 
     async function runInfer() {
         if (!imageUri) { setResult({ error: 'Pick an image first' }); return; }
+        setActiveDemoMode('off');
+        setVoiceTranscript('');
+        resetAnnouncementWindow();
         setLivePreviewResult(null);
         setResult(null);
         setTiming(null);
@@ -539,22 +889,45 @@ export default function InferenceScreen() {
     }
 
     async function startCamera() {
+        if (selectedDemoScenario) {
+            setCameraActive(true);
+            applyDemoScenario(selectedDemoScenario.mode);
+            return;
+        }
         if (!permission?.granted) {
             const p = await requestPermission();
             if (!p.granted) { setResult({ error: 'Camera permission denied' }); return; }
         }
+        setActiveDemoMode('off');
+        setVoiceTranscript('');
+        resetAnnouncementWindow();
         setLivePreviewResult(null);
         resetLiveStability();
         setCameraActive(true);
     }
 
     function stopCamera() {
+        const hadDemoScenario = activeDemoMode !== 'off';
         setCameraActive(false);
         setLiveRunning(false);
         liveRunningRef.current = false;
+        livePhaseRef.current = 'idle';
+        setLivePhase('idle');
         if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
+        if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+        }
         setLivePreviewResult(null);
+        setActiveDemoMode('off');
+        resetAnnouncementWindow();
         resetLiveStability();
+        if (hadDemoScenario) {
+            setResult(null);
+            setTiming(null);
+            setImageUri(null);
+            setVoiceTranscript('');
+        }
     }
 
     async function captureAndInferOnce() {
@@ -591,36 +964,149 @@ export default function InferenceScreen() {
         try {
             const shot = await cameraRef.current.takePictureAsync({ quality: 0.8, skipProcessing: true });
             if (!shot?.uri) { setResult({ error: 'Failed to capture frame' }); return; }
-            setImageUri(shot.uri);
+            if (!isLive) {
+                setImageUri(shot.uri);
+            }
             await runInferFromUri(shot.uri, isLive);
         } catch (e: any) {
             setResult({ error: e?.message || String(e) });
         }
     }
 
-    /** Schedule the next live capture after the current one finishes. */
-    function _scheduleLiveCapture() {
+    function _getLiveIntervalMs() {
+        return Math.max(LIVE_MIN_INTERVAL_MS, Math.round(1000 / liveFps));
+    }
+
+    function _scheduleLiveCapture(delayMs: number) {
         if (!liveRunningRef.current) return;
-        const intervalMs = Math.max(200, Math.round(1000 / settings.liveFps));
-        liveTimerRef.current = setTimeout(async () => {
-            if (!liveRunningRef.current) return;
-            await captureAndInferOnce();
-            _scheduleLiveCapture();
-        }, intervalMs);
+        liveTimerRef.current = setTimeout(() => {
+            void _runLiveIteration();
+        }, Math.max(0, delayMs));
+    }
+
+    async function _runLiveIteration() {
+        if (!liveRunningRef.current) return;
+        const startedAt = Date.now();
+        lastStableAcceptedRef.current = null;
+        await captureAndInferOnce();
+        if (!liveRunningRef.current) return;
+
+        // Stable detection confirmed → pause loop and enter announce-resume cycle
+        if (lastStableAcceptedRef.current) {
+            const { result: stableRes, ms } = lastStableAcceptedRef.current;
+            lastStableAcceptedRef.current = null;
+            liveRunningRef.current = false; // pause iteration; resumed after hold
+            _handleStableResult(stableRes, ms);
+            return;
+        }
+
+        // No stable detection for too long → announce and resume
+        if (Date.now() - noDetectionSinceRef.current > NO_DETECTION_TIMEOUT_MS) {
+            liveRunningRef.current = false;
+            _handleNoDetection();
+            return;
+        }
+
+        const elapsedMs = Date.now() - startedAt;
+        _scheduleLiveCapture(_getLiveIntervalMs() - elapsedMs);
+    }
+
+    function _handleStableResult(res: PipelineResponse, ms: number) {
+        livePhaseRef.current = 'announcing';
+        setLivePhase('announcing');
+        recordHistory(res, ms, null);
+        playEarcon('found');
+        if (settings.hapticFeedback) {
+            Vibration.vibrate(Platform.OS === 'web' ? 80 : [0, 60, 40, 80]);
+        }
+        const msg = _buildLiveAnnouncementText(res, classifierConfidenceThreshold);
+        speakWithCallback(msg, () => {
+            if (livePhaseRef.current === 'idle') return;
+            livePhaseRef.current = 'holding';
+            setLivePhase('holding');
+            resumeTimerRef.current = setTimeout(() => {
+                if (livePhaseRef.current === 'idle') return;
+                livePhaseRef.current = 'resuming';
+                setLivePhase('resuming');
+                resumeTimerRef.current = setTimeout(() => {
+                    if (livePhaseRef.current === 'idle') return;
+                    resetLiveStability();
+                    noDetectionSinceRef.current = Date.now();
+                    setLivePreviewResult(null);
+                    livePhaseRef.current = 'scanning';
+                    setLivePhase('scanning');
+                    liveRunningRef.current = true;
+                    void _runLiveIteration();
+                }, RESUME_LABEL_MS);
+            }, ANNOUNCE_HOLD_MS);
+        });
+    }
+
+    function _handleNoDetection() {
+        livePhaseRef.current = 'announcing';
+        setLivePhase('announcing');
+        noDetectionSinceRef.current = Date.now();
+        playEarcon('none');
+        if (settings.hapticFeedback) {
+            Vibration.vibrate(200);
+        }
+        speakWithCallback('No currency detected. Try moving the camera closer or improving the lighting.', () => {
+            if (livePhaseRef.current === 'idle') return;
+            livePhaseRef.current = 'resuming';
+            setLivePhase('resuming');
+            resumeTimerRef.current = setTimeout(() => {
+                if (livePhaseRef.current === 'idle') return;
+                resetLiveStability();
+                noDetectionSinceRef.current = Date.now();
+                setLivePreviewResult(null);
+                livePhaseRef.current = 'scanning';
+                setLivePhase('scanning');
+                liveRunningRef.current = true;
+                void _runLiveIteration();
+            }, RESUME_LABEL_MS);
+        });
+    }
+
+    function forceRescan() {
+        if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
+        if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+        }
+        resetLiveStability();
+        noDetectionSinceRef.current = Date.now();
+        setLivePreviewResult(null);
+        livePhaseRef.current = 'scanning';
+        setLivePhase('scanning');
+        liveRunningRef.current = true;
+        void _runLiveIteration();
     }
 
     function startLive() {
+        if (activeDemoScenario) { applyDemoScenario(activeDemoScenario.mode); return; }
         if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
+        if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
         setLiveRunning(true);
         liveRunningRef.current = true;
+        livePhaseRef.current = 'scanning';
+        setLivePhase('scanning');
+        setImageUri(null);
         resetLiveStability();
-        _scheduleLiveCapture();
+        noDetectionSinceRef.current = Date.now();
+        lastStableAcceptedRef.current = null;
+        void _runLiveIteration();
     }
 
     function stopLive() {
         setLiveRunning(false);
         liveRunningRef.current = false;
+        livePhaseRef.current = 'idle';
+        setLivePhase('idle');
         if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); liveTimerRef.current = null; }
+        if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); resumeTimerRef.current = null; }
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+        }
         setLivePreviewResult(null);
         resetLiveStability();
     }
@@ -628,9 +1114,137 @@ export default function InferenceScreen() {
     useEffect(() => {
         return () => {
             liveRunningRef.current = false;
+            livePhaseRef.current = 'idle';
             if (liveTimerRef.current) { clearTimeout(liveTimerRef.current); }
+            if (resumeTimerRef.current) { clearTimeout(resumeTimerRef.current); }
         };
     }, []);
+
+    // Keep cameraActiveRef in sync
+    useEffect(() => { cameraActiveRef.current = cameraActive; }, [cameraActive]);
+
+    /* ── Keyboard shortcuts (web only) ─────────────────────────────────────
+     * Space  – snap a frame (when camera active, not live)
+     * L      – toggle live mode
+     * F      – flip camera
+     * R      – force rescan (when live)
+     * Escape – stop camera / stop live                                       */
+    useEffect(() => {
+        if (Platform.OS !== 'web') return;
+
+        function handleKeyDown(e: KeyboardEvent) {
+            // Ignore when focus is in a text input
+            const tag = (document.activeElement as HTMLElement)?.tagName?.toLowerCase();
+            if (tag === 'input' || tag === 'textarea') return;
+
+            switch (e.key) {
+                case ' ':
+                case 'Spacebar':
+                    e.preventDefault();
+                    if (cameraActiveRef.current && !liveRunningRef.current) {
+                        captureAndInferOnce();
+                    }
+                    break;
+                case 'l':
+                case 'L':
+                    if (cameraActiveRef.current) {
+                        if (liveRunningRef.current) stopLive();
+                        else startLive();
+                    }
+                    break;
+                case 'f':
+                case 'F':
+                    if (cameraActiveRef.current && !liveRunningRef.current) {
+                        setCameraFacing((prev) => (prev === 'back' ? 'front' : 'back'));
+                    }
+                    break;
+                case 'r':
+                case 'R':
+                    if (cameraActiveRef.current && liveRunningRef.current) {
+                        forceRescan();
+                    }
+                    break;
+                case 'Escape':
+                    if (liveRunningRef.current) stopLive();
+                    else if (cameraActiveRef.current) stopCamera();
+                    break;
+            }
+        }
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    /* ── Consume global voice / keyboard commands from CameraCommandContext ──
+     * useFocusEffect ensures we handle commands as soon as this screen is
+     * focused (including when navigation brings us here from another tab).  */
+    useFocusEffect(
+        useCallback(() => {
+            if (!pendingCommand) return;
+            clearPendingCommand();
+
+            switch (pendingCommand) {
+                case 'snap':
+                    if (!cameraActiveRef.current) {
+                        wantsSnapAfterCameraStart.current = true;
+                        startCamera();
+                    } else {
+                        captureAndInferOnce();
+                    }
+                    break;
+                case 'go-live':
+                    if (!cameraActiveRef.current) {
+                        wantsLiveAfterCameraStart.current = true;
+                        startCamera();
+                    } else {
+                        startLive();
+                    }
+                    break;
+                case 'stop-live':
+                    if (liveRunningRef.current) stopLive();
+                    break;
+                case 'rescan':
+                    if (liveRunningRef.current) forceRescan();
+                    break;
+                case 'flip':
+                    if (!liveRunningRef.current) setCameraFacing((f) => (f === 'back' ? 'front' : 'back'));
+                    break;
+                case 'stop':
+                    stopCamera();
+                    break;
+            }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [pendingCommand]),
+    );
+
+    /* ── Follow-up after camera starts via voice command ────────────────────
+     * On web, WebLiveCamera fires onStreamReady once the video is actually
+     * playing — use that callback so we don't capture before a frame exists.
+     * On native, cameraActive flipping is sufficient (CameraView is ready).  */
+    const handleWebStreamReady = useCallback(() => {
+        if (wantsLiveAfterCameraStart.current) {
+            wantsLiveAfterCameraStart.current = false;
+            startLive();
+        } else if (wantsSnapAfterCameraStart.current) {
+            wantsSnapAfterCameraStart.current = false;
+            captureAndInferOnce();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        if (Platform.OS === 'web') return; // handled by handleWebStreamReady above
+        if (!cameraActive) return;
+        if (wantsLiveAfterCameraStart.current) {
+            wantsLiveAfterCameraStart.current = false;
+            startLive();
+        } else if (wantsSnapAfterCameraStart.current) {
+            wantsSnapAfterCameraStart.current = false;
+            captureAndInferOnce();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [cameraActive]);
 
     useEffect(() => {
         if (liveRunningRef.current) {
@@ -650,7 +1264,22 @@ export default function InferenceScreen() {
             }
             return;
         }
+        // Live mode owns its own TTS via the announce-resume cycle
+        if (liveRunning) return;
+        if (cameraActive && activeDemoScenario) {
+            const key = `demo|${activeDemoScenario.mode}`;
+            if (key === lastAnnouncementKeyRef.current) return;
+
+            const now = Date.now();
+            if (now - lastAnnouncementAtRef.current < 250) return;
+
+            lastAnnouncementKeyRef.current = key;
+            lastAnnouncementAtRef.current = now;
+            speakAnnouncement(activeDemoScenario.voiceMessage);
+            return;
+        }
         if (!result || result.error) return;
+        if (activeDemoScenario) return;
 
         const dets = _extractDetections(result);
         const coinCount = dets.filter((d: any) => _isCoinClassName(d?.class_name)).length;
@@ -671,7 +1300,7 @@ export default function InferenceScreen() {
             : `Detected ${billCount} bill${billCount === 1 ? '' : 's'} and ${coinCount} coin${coinCount === 1 ? '' : 's'}.`;
         const totalLine = `Guaranteed total amount is ${_toCadSpeech(guaranteedTotal)}.`;
         speakAnnouncement(`${countLine} ${totalLine}`);
-    }, [result, guaranteedClassifierSummary.total, settings.ttsEnabled, speakAnnouncement]);
+    }, [activeDemoScenario, cameraActive, result, guaranteedClassifierSummary.total, settings.ttsEnabled, speakAnnouncement]);
 
     useEffect(() => {
         return () => {
@@ -681,16 +1310,62 @@ export default function InferenceScreen() {
         };
     }, []);
 
-    /* ── Section wrapper ── */
-    const SectionCard = ({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) => (
-        <View style={[styles.card, shadows.card, { backgroundColor: tc.surface, borderColor: tc.border }]}>
-            <View style={styles.cardHeader}>
-                <Ionicons name={icon as any} size={18} color={tc.primary} />
-                <Text style={[typ.h3, { color: tc.textPrimary }]}>{title}</Text>
+    /* ── Section wrapper defined at module scope (see below InferenceScreen) ── */
+
+    const renderNativeLiveOverlay = () => {
+        if (Platform.OS === 'web' || activeDemoScenario || !liveRunning || detections.length === 0) {
+            return null;
+        }
+        if (!detectorImageSize || cameraViewportSize.width <= 0 || cameraViewportSize.height <= 0) {
+            return null;
+        }
+
+        const previewWidth = cameraViewportSize.width;
+        const previewHeight = cameraViewportSize.height;
+        const imageWidth = detectorImageSize.width;
+        const imageHeight = detectorImageSize.height;
+        const scale = Math.max(previewWidth / imageWidth, previewHeight / imageHeight);
+        const offsetX = (previewWidth - imageWidth * scale) / 2;
+        const offsetY = (previewHeight - imageHeight * scale) / 2;
+
+        return (
+            <View pointerEvents="none" style={styles.nativeOverlayLayer}>
+                {detections.map((det: any, index: number) => {
+                    if (!Array.isArray(det?.xyxy) || det.xyxy.length < 4) return null;
+                    const [x1, y1, x2, y2] = det.xyxy.map((value: unknown) => Number(value || 0));
+                    const left = offsetX + x1 * scale;
+                    const top = offsetY + y1 * scale;
+                    const width = Math.max(0, (x2 - x1) * scale);
+                    const height = Math.max(0, (y2 - y1) * scale);
+                    const color = _getDetectionColor(det);
+                    const label = `${String(det.display_name || det.class_name || '?')} ${Math.round(Number(det.confidence || 0) * 100)}%`;
+
+                    return (
+                        <View
+                            key={`native-det-${index}-${label}`}
+                            style={[
+                                styles.nativeDetectionBox,
+                                {
+                                    left,
+                                    top,
+                                    width,
+                                    height,
+                                    borderColor: color,
+                                    backgroundColor: color + '18',
+                                },
+                            ]}
+                        >
+                            <View style={[styles.nativeDetectionLabel, { backgroundColor: color }]}>
+                                <Text style={styles.nativeDetectionLabelText}>{label}</Text>
+                            </View>
+                        </View>
+                    );
+                })}
             </View>
-            {children}
-        </View>
-    );
+        );
+    };
+
+    const activeAlertColor = activeDemoScenario?.bannerTone === 'warning' ? tc.warning : tc.error;
 
     return (
         <ScrollView style={[styles.container, { backgroundColor: tc.background }]} contentContainerStyle={styles.scroll}>
@@ -719,15 +1394,36 @@ export default function InferenceScreen() {
             )}
 
             {/* ── Upload ── */}
+            {selectedDemoScenario && !cameraActive && (
+                <View
+                    testID="demo-flow-ready"
+                    style={[
+                        styles.banner,
+                        shadows.card,
+                        {
+                            backgroundColor: tc.info + '12',
+                            borderColor: tc.info + '33',
+                        },
+                    ]}
+                >
+                    <Ionicons name="flash-outline" size={18} color={tc.info} />
+                    <Text style={[typ.body, { color: tc.textSecondary, flex: 1 }]}>
+                        {selectedDemoScenario.activationHint}
+                    </Text>
+                </View>
+            )}
+
             <SectionCard title="Upload Image" icon="image-outline">
                 <View style={styles.buttonRow}>
                     <GradientButton title="Pick Image" onPress={pickImage} variant="outline" size="sm"
+                        testID="pick-image-button"
                         icon={<Ionicons name="folder-open-outline" size={16} color={tc.primary} />} />
                     <GradientButton
                         title={busy ? 'Running…' : 'Run Inference'}
                         onPress={runInfer}
                         disabled={busy || !imageUri}
                         size="sm"
+                        testID="run-inference-button"
                         icon={busy ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="play" size={16} color="#FFF" />}
                     />
                 </View>
@@ -737,53 +1433,171 @@ export default function InferenceScreen() {
             <SectionCard title="Live Camera" icon="videocam-outline">
                 {!cameraActive ? (
                     <GradientButton title="Start Camera" onPress={startCamera} variant="accent" size="sm"
+                        testID="scan-start-camera"
+                        accessibilityLabel="Start camera"
+                        accessibilityHint="Opens the camera viewfinder for scanning currency"
                         icon={<Ionicons name="camera-outline" size={16} color="#FFF" />} />
                 ) : (
                     <View style={styles.cameraBlock}>
-                        {Platform.OS === 'web' ? (
-                            <WebLiveCamera
-                                ref={webCamRef}
-                                facing={cameraFacing}
-                                detections={detections}
-                                active={cameraActive}
-                                height={300}
-                                onError={(msg) => setResult({ error: msg })}
-                            />
-                        ) : (
-                            <CameraView key={cameraFacing} ref={cameraRef} style={styles.cameraPreview} facing={cameraFacing} />
-                        )}
-                        <View style={styles.cameraControls}>
-                            <GradientButton title="Snap" onPress={captureAndInferOnce} disabled={busy} size="sm"
-                                icon={<Ionicons name="scan-outline" size={14} color="#FFF" />} />
-                            <GradientButton
-                                title={liveRunning ? 'Stop Live' : `Go Live (${settings.liveFps} fps)`}
-                                onPress={liveRunning ? stopLive : startLive}
-                                variant={liveRunning ? 'outline' : 'accent'}
-                                size="sm"
-                                icon={<Ionicons name={liveRunning ? 'pause' : 'play'} size={14} color={liveRunning ? tc.primary : '#FFF'} />}
-                            />
-                            <GradientButton
-                                title={cameraFacing === 'back' ? 'Front' : 'Back'}
-                                onPress={() => setCameraFacing((f) => (f === 'back' ? 'front' : 'back'))}
-                                variant="outline" size="sm"
-                                icon={<Ionicons name="camera-reverse-outline" size={14} color={tc.primary} />}
-                            />
-                        </View>
-                        {liveRunning && (
-                            <View style={[styles.liveStatus, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}>
-                                <Ionicons
-                                    name={liveStability.mode === 'stable' ? 'checkmark-circle' : 'time-outline'}
-                                    size={14}
-                                    color={liveStability.mode === 'stable' ? tc.accent : tc.textMuted}
+                        <View
+                            testID={activeDemoScenario ? 'demo-camera-preview' : undefined}
+                            style={styles.cameraViewport}
+                            onLayout={(event: LayoutChangeEvent) => {
+                                const { width, height } = event.nativeEvent.layout;
+                                if (width !== cameraViewportSize.width || height !== cameraViewportSize.height) {
+                                    setCameraViewportSize({ width, height });
+                                }
+                            }}
+                        >
+                            {Platform.OS === 'web' ? (
+                                <WebLiveCamera
+                                    ref={webCamRef}
+                                    facing={cameraFacing}
+                                    detections={activeDemoScenario ? [] : detections}
+                                    active={cameraActive}
+                                    height={300}
+                                    onError={(msg) => setResult({ error: msg })}
+                                    onStreamReady={handleWebStreamReady}
                                 />
-                                <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
-                                    {liveStability.mode === 'stable'
-                                        ? `Stable ${liveStability.className || ''} (${liveStability.seenFrames} frames)`
-                                        : `Stabilizing ${liveStability.className || ''} (${Math.ceil(liveStability.remainingMs / 1000)}s)`}
+                            ) : (
+                                <CameraView
+                                    key={cameraFacing}
+                                    ref={cameraRef}
+                                    style={styles.cameraPreview}
+                                    facing={cameraFacing}
+                                    animateShutter={!liveRunning}
+                                />
+                            )}
+                            {renderNativeLiveOverlay()}
+                            {activeDemoScenario && (
+                                <>
+                                    <View
+                                        style={[
+                                            styles.demoPreviewGlow,
+                                            { backgroundColor: activeDemoScenario.boxColor + '10' },
+                                        ]}
+                                    />
+                                    <View
+                                        testID="demo-bounding-box"
+                                        style={[
+                                            styles.demoBoundingBox,
+                                            {
+                                                borderColor: activeDemoScenario.boxColor,
+                                                backgroundColor: activeDemoScenario.boxColor + '12',
+                                            },
+                                        ]}
+                                    >
+                                        <View
+                                            style={[
+                                                styles.demoBoundingLabel,
+                                                { backgroundColor: activeDemoScenario.boxColor },
+                                            ]}
+                                        >
+                                            <Text style={styles.demoBoundingLabelText}>{activeDemoScenario.boxLabel}</Text>
+                                        </View>
+                                    </View>
+                                    <View
+                                        style={[
+                                            styles.demoScenarioCaption,
+                                            {
+                                                backgroundColor: tc.surface + 'EE',
+                                                borderColor: activeDemoScenario.boxColor + '55',
+                                            },
+                                        ]}
+                                    >
+                                        <Text style={[typ.bodyBold, { color: tc.textPrimary }]}>{activeDemoScenario.previewTitle}</Text>
+                                        <Text style={[typ.caption, { color: tc.textSecondary }]}>
+                                            {activeDemoScenario.previewBody}
+                                        </Text>
+                                    </View>
+                                </>
+                            )}
+                        </View>
+                        <View style={styles.cameraControls}>
+                            {activeDemoScenario ? (
+                                <GradientButton
+                                    title="Replay Demo"
+                                    onPress={() => applyDemoScenario(activeDemoScenario.mode)}
+                                    variant="accent"
+                                    size="sm"
+                                    testID="scan-replay-demo"
+                                    icon={<Ionicons name="refresh-outline" size={14} color="#FFF" />}
+                                />
+                            ) : (
+                                <>
+                                    <GradientButton title="Snap" onPress={captureAndInferOnce} disabled={busy || liveRunning} size="sm"
+                                        accessibilityLabel="Snap a photo and run inference"
+                                        accessibilityHint="Captures the current camera frame and sends it to the detector. Keyboard: Space"
+                                        icon={<Ionicons name="scan-outline" size={14} color="#FFF" />} />
+                                    {liveRunning && livePhase !== 'scanning' && (
+                                        <GradientButton
+                                            title="Scan Again"
+                                            onPress={forceRescan}
+                                            variant="accent" size="sm"
+                                            accessibilityLabel="Scan again"
+                                            accessibilityHint="Cancels the current hold and restarts the live scanning loop. Keyboard: R"
+                                            icon={<Ionicons name="refresh" size={14} color="#FFF" />}
+                                        />
+                                    )}
+                                    <GradientButton
+                                        title={liveRunning ? 'Stop Live' : 'Go Live'}
+                                        onPress={liveRunning ? stopLive : startLive}
+                                        variant={liveRunning ? 'outline' : 'accent'}
+                                        size="sm"
+                                        testID="toggle-live-button"
+                                        accessibilityLabel={liveRunning ? 'Stop live scanning' : 'Start live scanning'}
+                                        accessibilityHint={liveRunning ? 'Stops the continuous inference loop. Keyboard: L' : 'Runs inference automatically at the configured frame rate. Keyboard: L'}
+                                        icon={<Ionicons name={liveRunning ? 'stop' : 'play'} size={14} color={liveRunning ? tc.primary : '#FFF'} />}
+                                    />
+                                    {!liveRunning && (
+                                        <GradientButton
+                                            title={cameraFacing === 'back' ? 'Front' : 'Back'}
+                                            onPress={() => setCameraFacing((f) => (f === 'back' ? 'front' : 'back'))}
+                                            variant="outline" size="sm"
+                                            accessibilityLabel={cameraFacing === 'back' ? 'Switch to front camera' : 'Switch to back camera'}
+                                            accessibilityHint="Toggles between front and rear camera. Keyboard: F"
+                                            icon={<Ionicons name="camera-reverse-outline" size={14} color={tc.primary} />}
+                                        />
+                                    )}
+                                </>
+                            )}
+                        </View>
+                        {liveRunning && !activeDemoScenario && (
+                            <View
+                                testID="live-stability-status"
+                                style={[styles.liveStatus, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}
+                            >
+                                <Ionicons
+                                    name={
+                                        livePhase === 'announcing' ? 'checkmark-circle' :
+                                        livePhase === 'holding' || livePhase === 'resuming' ? 'refresh-outline' :
+                                        liveStability.mode === 'stabilizing' ? 'time-outline' : 'scan-outline'
+                                    }
+                                    size={14}
+                                    color={
+                                        livePhase === 'announcing' ? tc.accent :
+                                        livePhase === 'holding' || livePhase === 'resuming' ? tc.info :
+                                        tc.textMuted
+                                    }
+                                />
+                                <Text
+                                    accessibilityLiveRegion="polite"
+                                    accessibilityRole="status"
+                                    style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}
+                                >
+                                    {livePhase === 'announcing' ? 'Detected! Announcing…'
+                                        : livePhase === 'holding' ? 'Result saved. Preparing to rescan…'
+                                        : livePhase === 'resuming' ? 'Resuming scan…'
+                                        : liveStability.mode === 'stabilizing' && liveStability.className
+                                        ? `Confirming ${liveStability.className}… (${Math.ceil(liveStability.remainingMs / 1000)}s)`
+                                        : 'Scanning for currency…'}
                                 </Text>
                             </View>
                         )}
                         <GradientButton title="Stop Camera" onPress={stopCamera} variant="outline" size="sm"
+                            testID="scan-stop-camera"
+                            accessibilityLabel="Stop camera"
+                            accessibilityHint="Closes the camera and stops any live scanning. Keyboard: Escape"
                             icon={<Ionicons name="close" size={14} color={tc.primary} />}
                             style={{ marginTop: spacing.sm }} />
                     </View>
@@ -792,7 +1606,10 @@ export default function InferenceScreen() {
 
             {/* ── Image preview with bbox overlay ── */}
             {imageUri && (
-                <View style={[styles.previewCard, shadows.card, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+                <View
+                    testID="captured-image-preview"
+                    style={[styles.previewCard, shadows.card, { backgroundColor: tc.surface, borderColor: tc.border }]}
+                >
                     <ImageWithOverlay
                         uri={imageUri}
                         detections={detections}
@@ -811,7 +1628,33 @@ export default function InferenceScreen() {
             )}
 
             {/* ── Error ── */}
-            {spoofCheck?.suspected && (
+            {activeDemoScenario && (
+                <View
+                    testID="demo-alert-banner"
+                    style={[
+                        styles.banner,
+                        shadows.card,
+                        {
+                            backgroundColor: activeAlertColor + '15',
+                            borderColor: activeAlertColor + '33',
+                        },
+                    ]}
+                >
+                    <Ionicons
+                        name={activeDemoScenario.bannerTone === 'warning' ? 'warning-outline' : 'alert-circle-outline'}
+                        size={18}
+                        color={activeAlertColor}
+                    />
+                    <View style={{ flex: 1 }}>
+                        <Text style={[typ.bodyBold, { color: activeAlertColor }]}>{activeDemoScenario.alertTitle}</Text>
+                        <Text style={[typ.caption, { color: tc.textSecondary, marginTop: 2 }]}>
+                            {activeDemoScenario.alertMessage}
+                        </Text>
+                    </View>
+                </View>
+            )}
+
+            {spoofCheck?.suspected && !activeDemoScenario && (
                 <View
                     style={[
                         styles.banner,
@@ -843,6 +1686,74 @@ export default function InferenceScreen() {
             )}
 
             {/* ── Detections ── */}
+            {activeDemoScenario?.budgetSummary && (
+                <SectionCard title="Budget Guard" icon="wallet-outline">
+                    <View
+                        testID="budget-summary-card"
+                        style={[
+                            styles.budgetCard,
+                            {
+                                backgroundColor: tc.surfaceElevated,
+                                borderColor: tc.border,
+                            },
+                        ]}
+                    >
+                        <View style={styles.budgetRow}>
+                            <Text style={[typ.caption, { color: tc.textSecondary }]}>Weekly budget</Text>
+                            <Text style={[typ.bodyBold, { color: tc.textPrimary }]}>
+                                {_formatCad(activeDemoScenario.budgetSummary.weeklyBudget)}
+                            </Text>
+                        </View>
+                        <View style={styles.budgetRow}>
+                            <Text style={[typ.caption, { color: tc.textSecondary }]}>Already spent this week</Text>
+                            <Text style={[typ.bodyBold, { color: tc.textPrimary }]}>
+                                {_formatCad(activeDemoScenario.budgetSummary.spentSoFar)}
+                            </Text>
+                        </View>
+                        <View style={styles.budgetRow}>
+                            <Text style={[typ.caption, { color: tc.textSecondary }]}>Detected spend</Text>
+                            <Text style={[typ.bodyBold, { color: tc.warning }]}>
+                                {_formatCad(activeDemoScenario.budgetSummary.detectedSpend)}
+                            </Text>
+                        </View>
+                        <View
+                            style={[
+                                styles.budgetImpact,
+                                {
+                                    backgroundColor: tc.warning + '12',
+                                    borderColor: tc.warning + '33',
+                                },
+                            ]}
+                        >
+                            <Ionicons name="trending-up-outline" size={16} color={tc.warning} />
+                            <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                                {`Projected weekly spend becomes ${_formatCad(activeDemoScenario.budgetSummary.projectedSpend)}. That is ${_formatCad(activeDemoScenario.budgetSummary.overBy)} over budget.`}
+                            </Text>
+                        </View>
+                    </View>
+                </SectionCard>
+            )}
+
+            {voiceTranscript ? (
+                <SectionCard title="Voice Output" icon="volume-high-outline">
+                    <View
+                        testID="voice-output-card"
+                        style={[
+                            styles.voiceCard,
+                            {
+                                backgroundColor: tc.surfaceElevated,
+                                borderColor: tc.border,
+                            },
+                        ]}
+                    >
+                        <Text style={[typ.caption, { color: tc.textMuted }]}>Last spoken message</Text>
+                        <Text testID="voice-output-text" style={[typ.bodyBold, { color: tc.textPrimary }]}>
+                            {voiceTranscript}
+                        </Text>
+                    </View>
+                </SectionCard>
+            ) : null}
+
             {detections.length > 0 && (
                 <SectionCard
                     title={`Detections (${detections.length}${allDetections.length > detections.length ? ` of ${allDetections.length}` : ''})`}
@@ -908,14 +1819,17 @@ export default function InferenceScreen() {
 
             {(result?.result?.classification || topCandidates.length > 0) && (
                 <SectionCard title="Guaranteed Amount" icon="cash-outline">
-                    <View style={[styles.guaranteedCard, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}>
+                    <View
+                        testID="guaranteed-amount-card"
+                        style={[styles.guaranteedCard, { backgroundColor: tc.surfaceElevated, borderColor: tc.border }]}
+                    >
                         <View style={styles.guaranteedHeaderRow}>
                             <Text style={[typ.caption, { color: tc.textSecondary }]}>Classifier-backed minimum</Text>
                             <Text style={[typ.caption, { color: tc.textMuted }]}>
                                 {`>= ${guaranteedClassifierSummary.thresholdPct}% top-1`}
                             </Text>
                         </View>
-                        <Text style={[styles.guaranteedAmount, { color: tc.accent }]}>
+                        <Text testID="guaranteed-amount-value" style={[styles.guaranteedAmount, { color: tc.accent }]}>
                             {_formatCad(guaranteedClassifierSummary.total)}
                         </Text>
                         <Text style={[typ.caption, { color: tc.textMuted }]}>
@@ -950,6 +1864,24 @@ export default function InferenceScreen() {
     );
 }
 
+/* ── SectionCard ─────────────────────────────────────────────────────────────
+ * Defined outside InferenceScreen so React sees a stable component type across
+ * re-renders. An inline component definition recreates the type on every render,
+ * causing React to unmount + remount all children (including WebLiveCamera's
+ * video element), which was the root cause of the live-camera shutter effect.  */
+function SectionCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
+    const { tc, typography: typ } = useThemeColors();
+    return (
+        <View style={[styles.card, shadows.card, { backgroundColor: tc.surface, borderColor: tc.border }]}>
+            <View style={styles.cardHeader}>
+                <Ionicons name={icon as any} size={18} color={tc.primary} />
+                <Text style={[typ.h3, { color: tc.textPrimary }]}>{title}</Text>
+            </View>
+            {children}
+        </View>
+    );
+}
+
 const styles = StyleSheet.create({
     container: { flex: 1 },
     scroll: { padding: spacing.lg, gap: spacing.lg },
@@ -959,7 +1891,82 @@ const styles = StyleSheet.create({
     textInput: { flex: 1, borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: 1 },
     buttonRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
     cameraBlock: { gap: spacing.sm },
-    cameraPreview: { width: '100%', height: 280, borderRadius: radii.md, overflow: 'hidden' },
+    cameraViewport: {
+        width: '100%',
+        height: 300,
+        borderRadius: radii.md,
+        overflow: 'hidden',
+        position: 'relative',
+        backgroundColor: '#000',
+    },
+    cameraPreview: { width: '100%', height: 300, borderRadius: radii.md, overflow: 'hidden' },
+    demoPreviewGlow: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        pointerEvents: 'none',
+    },
+    demoBoundingBox: {
+        position: 'absolute',
+        top: '12%',
+        left: '10%',
+        width: '80%',
+        height: '72%',
+        borderWidth: 4,
+        borderRadius: radii.md,
+        pointerEvents: 'none',
+    },
+    demoBoundingLabel: {
+        position: 'absolute',
+        top: -1,
+        left: -1,
+        borderTopLeftRadius: radii.sm,
+        borderBottomRightRadius: radii.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs,
+    },
+    demoBoundingLabelText: {
+        color: '#FFF',
+        fontSize: 12,
+        fontWeight: '800',
+        letterSpacing: 0.3,
+    },
+    demoScenarioCaption: {
+        position: 'absolute',
+        left: spacing.md,
+        right: spacing.md,
+        bottom: spacing.md,
+        borderRadius: radii.sm,
+        borderWidth: 1,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.sm,
+        gap: spacing.xs,
+    },
+    nativeOverlayLayer: {
+        ...StyleSheet.absoluteFillObject,
+        pointerEvents: 'none',
+    },
+    nativeDetectionBox: {
+        position: 'absolute',
+        borderWidth: 3,
+        borderRadius: radii.sm,
+    },
+    nativeDetectionLabel: {
+        position: 'absolute',
+        top: -1,
+        left: -1,
+        borderTopLeftRadius: radii.sm,
+        borderBottomRightRadius: radii.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs,
+    },
+    nativeDetectionLabelText: {
+        color: '#FFF',
+        fontSize: 11,
+        fontWeight: '800',
+    },
     cameraControls: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
     liveStatus: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderWidth: 1, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
     previewCard: { borderRadius: radii.lg, overflow: 'hidden', borderWidth: 1 },
@@ -975,6 +1982,18 @@ const styles = StyleSheet.create({
         paddingVertical: spacing.xs,
         marginBottom: spacing.sm,
     },
+    budgetCard: { borderRadius: radii.md, borderWidth: 1, padding: spacing.md, gap: spacing.sm },
+    budgetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+    budgetImpact: {
+        borderWidth: 1,
+        borderRadius: radii.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+    },
+    voiceCard: { borderRadius: radii.md, borderWidth: 1, padding: spacing.md, gap: spacing.sm },
     guaranteedCard: { borderRadius: radii.md, borderWidth: 1, padding: spacing.md, gap: spacing.sm },
     guaranteedHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     guaranteedAmount: { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },

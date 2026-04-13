@@ -2,7 +2,9 @@
 S3 artifact synchronisation – download model tarballs and extract them.
 """
 
+import logging
 import tarfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -13,6 +15,8 @@ except Exception:
 
 from app.core.config import settings
 from app.services.model_manager import list_local_models
+
+logger = logging.getLogger("smc.s3_sync")
 
 
 def aws_model_sync_reason() -> Optional[str]:
@@ -125,9 +129,32 @@ def read_deploy_text(name: str) -> Optional[str]:
     return None
 
 
+@lru_cache(maxsize=1)
+def infer_artifacts_bucket_from_aws_identity() -> Optional[str]:
+    """Infer the standard artifact bucket name from the active AWS account."""
+    reason = aws_model_sync_reason()
+    if reason is not None:
+        return None
+
+    try:
+        sts = boto3.client("sts", region_name=settings.s3_region)
+        account_id = str(sts.get_caller_identity().get("Account", "")).strip()
+    except Exception as exc:
+        logger.info("Could not infer artifact bucket from AWS identity: %s", exc)
+        return None
+
+    if not account_id.isdigit():
+        return None
+    return f"smc-phase2-artifacts-{account_id}"
+
+
 def resolve_artifact_defaults() -> Dict[str, Optional[str]]:
     """Resolve default S3 bucket/prefix from deploy files first, then env-backed settings."""
-    bucket = read_deploy_text("models_bucket.txt") or settings.artifacts_bucket
+    bucket = (
+        read_deploy_text("models_bucket.txt")
+        or settings.artifacts_bucket
+        or infer_artifacts_bucket_from_aws_identity()
+    )
     prefix = read_deploy_text("models_prefix.txt") or settings.artifacts_prefix
     bucket = str(bucket).strip() if bucket is not None else None
     prefix = str(prefix).strip() if prefix is not None else settings.artifacts_prefix

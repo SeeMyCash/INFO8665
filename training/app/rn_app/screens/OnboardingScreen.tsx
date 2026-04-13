@@ -15,6 +15,7 @@ import AnimatedCard from '../components/AnimatedCard';
 import ScanBillsSvg from '../components/svg/ScanBillsSvg';
 import ClassifyBillsSvg from '../components/svg/ClassifyBillsSvg';
 import AnnounceTotalSvg from '../components/svg/AnnounceTotalSvg';
+import VoiceCommandsSvg from '../components/svg/VoiceCommandsSvg';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { spacing } from '../theme';
 
@@ -32,12 +33,14 @@ const SLIDES_DARK = [
     { gradient: ['#312E81', '#1E1B4B'] as const },
     { gradient: ['#064E3B', '#0F3428'] as const },
     { gradient: ['#78350F', '#451A03'] as const },
+    { gradient: ['#1E1B4B', '#2E1065'] as const },
 ];
 
 const SLIDES_LIGHT = [
     { gradient: ['#EDE9FE', '#DDD6FE'] as const },
     { gradient: ['#D1FAE5', '#A7F3D0'] as const },
     { gradient: ['#FEF3C7', '#FDE68A'] as const },
+    { gradient: ['#EEF2FF', '#E0E7FF'] as const },
 ];
 
 const SLIDES_CONTENT = [
@@ -55,6 +58,11 @@ const SLIDES_CONTENT = [
         Svg: AnnounceTotalSvg,
         title: 'Hear the Total',
         body: 'See My Cash announces the counted total via text-to-speech. Designed with accessibility in mind so everyone can identify their cash.',
+    },
+    {
+        Svg: VoiceCommandsSvg,
+        title: 'Hands-Free Control',
+        body: 'Enable Voice Commands in Settings to control the camera without touching the screen. Say "Go Live", "Snap", "Flip", "Scan Again", or "Stop Camera". Keyboard shortcuts also available: Space, L, F, R, Escape.',
     },
 ];
 

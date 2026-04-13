@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Switch, Pressable, TextInput, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSettings, DEFAULT_SETTINGS } from '../contexts/SettingsContext';
+import { useCameraPermissions } from 'expo-camera';
+import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../contexts/HistoryContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { DEMO_FLOW_OPTIONS, getDemoScenario } from '../demo/demoFlows';
 import GradientButton from '../components/GradientButton';
 import AnimatedCard from '../components/AnimatedCard';
 import { useToast } from '../components/Toast';
@@ -18,6 +20,9 @@ export default function SettingsScreen() {
     const { entries, clearStorage: clearHistoryStorage, count: historyCount } = useHistory();
     const { tc, isDark, typography: typ } = useThemeColors();
     const { show } = useToast();
+    const selectedDemoScenario = getDemoScenario(settings.demoFlowMode);
+    const [, requestCameraPermission] = useCameraPermissions();
+    const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
 
     const handleReset = () => {
         reset();
@@ -45,6 +50,41 @@ export default function SettingsScreen() {
                     { text: 'Clear', style: 'destructive', onPress: doClear },
                 ]
             );
+        }
+    };
+
+    const handleRequestPermissions = async () => {
+        setPermissionStatus('Requesting…');
+
+        if (Platform.OS === 'web') {
+            if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+                setPermissionStatus('Not supported in this browser');
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+                stream.getTracks().forEach((t) => t.stop());
+                setPermissionStatus('Camera and microphone granted');
+                show('Permissions granted', 'success');
+            } catch (e: any) {
+                const msg = e?.name === 'NotAllowedError'
+                    ? 'Blocked by browser — open Site Settings to re-enable'
+                    : `Permission error: ${e?.message || String(e)}`;
+                setPermissionStatus(msg);
+                show(msg, 'error');
+            }
+        } else {
+            // Native — camera via expo-camera; mic requires expo-av (not installed)
+            const result = await requestCameraPermission();
+            if (result.granted) {
+                setPermissionStatus('Camera granted');
+                show('Camera permission granted', 'success');
+            } else if (result.canAskAgain) {
+                setPermissionStatus('Camera denied — tap again to retry');
+            } else {
+                setPermissionStatus('Camera blocked — open device Settings to re-enable');
+                show('Open device Settings to re-enable camera access', 'error');
+            }
         }
     };
 
@@ -78,7 +118,12 @@ export default function SettingsScreen() {
         </View>
     );
 
-    const renderThreshold = (options: number[], current: number, onSelect: (v: number) => void) => (
+    const renderThreshold = (
+        options: number[],
+        current: number,
+        onSelect: (v: number) => void,
+        testIdPrefix?: string,
+    ) => (
         <View style={styles.thresholdRow}>
             {options.map((v) => (
                 <Pressable
@@ -92,6 +137,7 @@ export default function SettingsScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={`${v}`}
                     accessibilityState={{ selected: current === v }}
+                    testID={testIdPrefix ? `${testIdPrefix}-${String(v).replace('.', '_')}` : undefined}
                 >
                     <Text style={[
                         typ.caption,
@@ -136,6 +182,37 @@ export default function SettingsScreen() {
     const switchThumb = (active: boolean, color?: string) =>
         active ? (color || tc.primary) : tc.textMuted;
 
+    const renderDemoOption = (option: (typeof DEMO_FLOW_OPTIONS)[number]) => {
+        const selected = settings.demoFlowMode === option.value;
+        return (
+            <Pressable
+                key={option.value}
+                onPress={() => update({ demoFlowMode: option.value })}
+                style={[
+                    styles.demoOption,
+                    {
+                        backgroundColor: selected ? tc.primary + '12' : tc.surfaceElevated,
+                        borderColor: selected ? tc.primary : tc.border,
+                    },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={option.label}
+                accessibilityState={{ selected }}
+                testID={`demo-flow-${option.value}`}
+            >
+                <View style={styles.demoOptionHeader}>
+                    <Text style={[typ.bodyBold, { color: tc.textPrimary, flex: 1 }]}>{option.label}</Text>
+                    <Ionicons
+                        name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={18}
+                        color={selected ? tc.primary : tc.textMuted}
+                    />
+                </View>
+                <Text style={[typ.caption, { color: tc.textMuted }]}>{option.summary}</Text>
+            </Pressable>
+        );
+    };
+
     return (
         <ScrollView style={[styles.container, { backgroundColor: tc.background }]} contentContainerStyle={styles.scroll}>
             {/* Appearance */}
@@ -172,9 +249,24 @@ export default function SettingsScreen() {
             {/* Detection */}
             {renderSection('Detection', 'scan-outline', <>
                 {renderRow(
-                    'Confidence Threshold',
-                    `${Math.round(settings.confidenceThreshold * 100)}% — lower = more detections`,
-                    renderThreshold([0.1, 0.25, 0.5, 0.75], settings.confidenceThreshold, (v) => update({ confidenceThreshold: v }))
+                    'Detector Threshold',
+                    `${Math.round(settings.confidenceThreshold * 100)}% — detector boxes below this are hidden`,
+                    renderThreshold(
+                        [0.1, 0.25, 0.5, 0.75],
+                        settings.confidenceThreshold,
+                        (v) => update({ confidenceThreshold: v }),
+                        'detector-threshold'
+                    )
+                )}
+                {renderRow(
+                    'Classifier Threshold',
+                    `${Math.round(settings.classifierConfidenceThreshold * 100)}% — denomination labels and totals must clear this`,
+                    renderThreshold(
+                        [0.5, 0.7, 0.85, 0.95],
+                        settings.classifierConfidenceThreshold,
+                        (v) => update({ classifierConfidenceThreshold: v }),
+                        'classifier-threshold'
+                    )
                 )}
             </>, 120)}
 
@@ -205,22 +297,22 @@ export default function SettingsScreen() {
                     )
                 )}
                 {renderRow('Live FPS', `${settings.liveFps} frame/sec`,
-                    renderThreshold([1, 2, 3, 5], settings.liveFps, (v) => update({ liveFps: v }))
+                    renderThreshold([1, 2, 3, 5, 8], settings.liveFps, (v) => update({ liveFps: v }), 'live-fps')
                 )}
                 {renderRow(
                     'Stability Window',
                     `${settings.liveStabilityWindowSec}s confirmation window`,
-                    renderThreshold([1, 2, 3, 4, 5], settings.liveStabilityWindowSec, (v) => update({ liveStabilityWindowSec: v }))
+                    renderThreshold([1, 2, 3, 4, 5], settings.liveStabilityWindowSec, (v) => update({ liveStabilityWindowSec: v }), 'live-stability-window')
                 )}
                 {renderRow(
                     'Min Stable Frames',
                     `${settings.liveStabilityMinFrames} consecutive frames required`,
-                    renderThreshold([2, 3, 4, 5, 6], settings.liveStabilityMinFrames, (v) => update({ liveStabilityMinFrames: v }))
+                    renderThreshold([2, 3, 4, 5, 6], settings.liveStabilityMinFrames, (v) => update({ liveStabilityMinFrames: v }), 'live-stability-frames')
                 )}
                 {renderRow(
                     'Box IoU Match',
                     `${Math.round(settings.liveStabilityIou * 100)}% overlap required`,
-                    renderThreshold([0.3, 0.45, 0.6, 0.75], settings.liveStabilityIou, (v) => update({ liveStabilityIou: v }))
+                    renderThreshold([0.3, 0.45, 0.6, 0.75], settings.liveStabilityIou, (v) => update({ liveStabilityIou: v }), 'live-stability-iou')
                 )}
             </>, 180)}
 
@@ -269,7 +361,60 @@ export default function SettingsScreen() {
                         thumbColor={switchThumb(settings.hapticFeedback, tc.accent)}
                     />
                 ))}
+                {renderRow('Voice Commands', 'Control the camera with your voice (web only)', (
+                    <Switch
+                        value={settings.voiceCommandsEnabled}
+                        onValueChange={(v) => update({ voiceCommandsEnabled: v })}
+                        trackColor={switchTrack(settings.voiceCommandsEnabled, tc.accent)}
+                        thumbColor={switchThumb(settings.voiceCommandsEnabled, tc.accent)}
+                    />
+                ))}
             </>, 300)}
+
+            {/* Permissions */}
+            {renderSection('Permissions', 'shield-outline', <>
+                {renderRow(
+                    'Camera & Microphone',
+                    permissionStatus ?? (Platform.OS === 'web'
+                        ? 'Re-prompt the browser for camera and microphone access'
+                        : 'Re-prompt the OS for camera access'),
+                    (
+                        <GradientButton
+                            title="Request"
+                            onPress={handleRequestPermissions}
+                            variant="outline"
+                            size="sm"
+                            icon={<Ionicons name="mic-outline" size={14} color={tc.primary} />}
+                        />
+                    )
+                )}
+            </>, 310)}
+
+            {/* Demo flows */}
+            {renderSection('Demo Flows', 'flash-outline', <>
+                <Text style={[typ.caption, styles.demoIntro, { color: tc.textMuted }]}>
+                    Arm a scripted demo flow. On the Scan tab, pressing Start Camera will trigger the selected scenario immediately.
+                </Text>
+                <View style={styles.demoOptionList}>
+                    {DEMO_FLOW_OPTIONS.map(renderDemoOption)}
+                </View>
+                {selectedDemoScenario && (
+                    <View
+                        style={[
+                            styles.demoStatus,
+                            {
+                                backgroundColor: tc.warning + '12',
+                                borderColor: tc.warning + '33',
+                            },
+                        ]}
+                    >
+                        <Ionicons name="megaphone-outline" size={16} color={tc.warning} />
+                        <Text style={[typ.caption, { color: tc.textSecondary, flex: 1 }]}>
+                            {selectedDemoScenario.activationHint}
+                        </Text>
+                    </View>
+                )}
+            </>, 330)}
 
             {/* Debug */}
             {renderSection('Developer', 'code-slash-outline', <>
@@ -343,6 +488,34 @@ const styles = StyleSheet.create({
     thresholdRow: { flexDirection: 'row', gap: spacing.xs },
     thresholdBtn: {
         paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radii.sm,
+    },
+    demoIntro: {
+        marginBottom: spacing.md,
+        lineHeight: 18,
+    },
+    demoOptionList: {
+        gap: spacing.sm,
+    },
+    demoOption: {
+        borderRadius: radii.md,
+        borderWidth: 1,
+        padding: spacing.md,
+        gap: spacing.xs,
+    },
+    demoOptionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
+    },
+    demoStatus: {
+        marginTop: spacing.md,
+        borderWidth: 1,
+        borderRadius: radii.sm,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
     },
     segmentWrap: {
         flexDirection: 'row', gap: 2, borderRadius: radii.sm, padding: 2,

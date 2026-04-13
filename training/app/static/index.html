@@ -76,11 +76,12 @@
           <button id="startCamBtn">Start Camera</button>
           <button id="stopCamBtn" disabled>Stop Camera</button>
           <button id="captureBtn">Capture + Infer</button>
-          <button id="toggleLiveBtn">Start Live (1 fps)</button>
+          <button id="toggleLiveBtn">Go Live</button>
         </div>
         <div class="video-wrap">
-          <video id="video" autoplay playsinline></video>
+          <video id="video" playsinline></video>
           <canvas id="videoOverlay" class="hidden"></canvas>
+          <span class="live-badge hidden">● LIVE</span>
         </div>
         <canvas id="captureCanvas" class="hidden"></canvas>
       </section>
