@@ -1,0 +1,19 @@
+banknotes:
+  - https://universe.roboflow.com/object-detection-ykbxg/testamp
+  - https://universe.roboflow.com/indian-currency-detection/cad1
+  - https://universe.roboflow.com/cvproject-mun/money-and-coins
+  - https://universe.roboflow.com/canada-currency/canada-currency
+  - https://universe.roboflow.com/jefferson-workplace/canada-10
+
+coins:
+  - https://universe.roboflow.com/ryan-hu-j7q6o/canadian-coins
+  - https://universe.roboflow.com/nixart-dgty6/candian-coins-detector
+
+confusers:
+  - https://universe.roboflow.com/roboflow-100/receipts-dy2wq
+  - https://universe.roboflow.com/first-9kwz3/business-card-sg7cv
+  - https://universe.roboflow.com/christmas-lottery-jzx46/lottery-ticket-number-finder
+  - https://universe.roboflow.com/ccscanner/credit_card_detection-pdthb
+
+backgrounds:
+  - https://universe.roboflow.com/texture-dataset/textures_w_masks

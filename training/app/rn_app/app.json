@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "SMC Inference",
+    "slug": "smc-inference",
+    "version": "0.1.0",
+    "platforms": ["ios", "android", "web"],
+    "orientation": "portrait",
+    "jsEngine": "hermes",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow SMC Inference to access your camera for live money detection.",
+          "microphonePermission": "Allow SMC Inference to access your microphone for voice commands."
+        }
+      ]
+    ],
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

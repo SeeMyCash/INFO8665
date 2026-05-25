@@ -1,0 +1,50 @@
+# Local data + outputs
+data/
+outputs/datasets/
+outputs/tmp/
+outputs/mlflow/
+outputs/app-data/
+mlruns/
+mlartifacts/
+node_modules/
+training/app/rn_app/playwright-report/
+training/app/rn_app/test-results/
+.env
+.env.*
+!.env.example
+gitleaks-report*.json
+dev/secrets/
+secrets/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+dist/
+
+# Model weights (tracked via LFS or release artifacts)
+# Already-committed champion weights are grandfathered in
+# *.pt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local scratch / generated mobile artifacts
+_tmp_*
+training/app/rn_app/_tmp_*
+training/app/rn_app/android/
+training/app/rn_app/outputs/
+outputs/mobile-build/
+outputs/mobile_probe/
+outputs/mobile_probe18/
+training/outputs/app-data/
+

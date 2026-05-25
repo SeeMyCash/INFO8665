@@ -1,0 +1,190 @@
+# Docker Compose for INFO8665 - See My Cash inference + experiment tracking
+# Usage:
+#   copy .env.example .env
+#   docker compose up --build -d
+#   docker compose run --rm tests
+#   docker compose --profile monitoring up -d
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: smc-postgres
+    ports:
+      - "${DB_EXPOSE_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${DB_NAME:-smc_app}
+      POSTGRES_USER: ${DB_USERNAME:-smc_app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-smc_app_local_dev_password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./training
+      dockerfile: Dockerfile
+    container_name: smc-inference-api
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      ENABLE_AWS_MODEL_SYNC: ${ENABLE_AWS_MODEL_SYNC:-0}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-}
+      ARTIFACTS_PREFIX: ${ARTIFACTS_PREFIX:-output}
+      SPOOF_GUARD_ENABLED: ${SPOOF_GUARD_ENABLED:-0}
+      APP_STORAGE_BACKEND: ${APP_STORAGE_BACKEND:-database}
+      APP_LOCAL_STORAGE_PATH: ${APP_LOCAL_STORAGE_PATH:-/training/outputs/app-data/inference-history.jsonl}
+      APP_STORAGE_MAX_HISTORY: ${APP_STORAGE_MAX_HISTORY:-250}
+      APP_SECRETS_DIR: ${APP_SECRETS_DIR:-/run/secrets}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_DRIVER: ${DB_DRIVER:-postgresql+psycopg}
+      DB_HOSTNAME: ${DB_HOSTNAME:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-smc_app}
+      DB_USERNAME: ${DB_USERNAME:-smc_app}
+      DB_PASSWORD: ${DB_PASSWORD:-smc_app_local_dev_password}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+    volumes:
+      - ./outputs/app-data:/training/outputs/app-data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 5
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: monitoring/mlflow/Dockerfile
+    container_name: smc-mlflow
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    environment:
+      MLFLOW_BACKEND_STORE_URI: ${MLFLOW_BACKEND_STORE_URI:-sqlite:////mlflow/mlflow.db}
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: ${MLFLOW_DEFAULT_ARTIFACT_ROOT:-file:///mlflow/artifacts}
+    command:
+      - mlflow
+      - server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --backend-store-uri
+      - "${MLFLOW_BACKEND_STORE_URI:-sqlite:////mlflow/mlflow.db}"
+      - --default-artifact-root
+      - "${MLFLOW_DEFAULT_ARTIFACT_ROOT:-file:///mlflow/artifacts}"
+    volumes:
+      - ./outputs/mlflow:/mlflow
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: smc-prometheus
+    profiles: ["monitoring"]
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: smc-loki
+    profiles: ["monitoring"]
+    ports:
+      - "3100:3100"
+    command:
+      - "-config.file=/etc/loki/loki-config.yaml"
+    volumes:
+      - ./monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki-data:/loki
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: smc-promtail
+    profiles: ["monitoring"]
+    depends_on:
+      loki:
+        condition: service_started
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+    volumes:
+      - ./monitoring/promtail/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: smc-grafana
+    profiles: ["monitoring"]
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: ${GF_USERS_ALLOW_SIGN_UP:-false}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/json/smc-api-overview.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+
+  tests:
+    build:
+      context: ./training
+      dockerfile: Dockerfile
+    container_name: smc-e2e-tests
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      ENABLE_AWS_MODEL_SYNC: ${ENABLE_AWS_MODEL_SYNC:-0}
+      APP_STORAGE_BACKEND: ${APP_STORAGE_BACKEND:-database}
+      APP_LOCAL_STORAGE_PATH: ${APP_LOCAL_STORAGE_PATH:-/training/outputs/app-data/inference-history.jsonl}
+      APP_STORAGE_MAX_HISTORY: ${APP_STORAGE_MAX_HISTORY:-250}
+      APP_SECRETS_DIR: ${APP_SECRETS_DIR:-/run/secrets}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_DRIVER: ${DB_DRIVER:-postgresql+psycopg}
+      DB_HOSTNAME: ${DB_HOSTNAME:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-smc_app}
+      DB_USERNAME: ${DB_USERNAME:-smc_app}
+      DB_PASSWORD: ${DB_PASSWORD:-smc_app_local_dev_password}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      TEST_BASE_URL: http://api:8080
+      EXPECTED_STORAGE_BACKEND: ${APP_STORAGE_BACKEND:-database}
+    entrypoint: ["pytest", "app/tests/", "-v", "--tb=short"]
+    profiles:
+      - test
+
+volumes:
+  grafana-data:
+  loki-data:
+  postgres-data:

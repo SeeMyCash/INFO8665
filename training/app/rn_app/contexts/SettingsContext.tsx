@@ -1,0 +1,166 @@
+/**
+ * Global settings context — persisted to AsyncStorage.
+ * Provides API config, detection thresholds, accessibility, camera, and TTS settings.
+ */
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { DemoFlowMode } from '../demo/demoFlows';
+
+const STORAGE_KEY = '@smc/settings';
+const SETTINGS_VERSION_KEY = '@smc/settings/version';
+const SETTINGS_SCHEMA_VERSION = 4;
+const ENV = process.env as Record<string, string | undefined>;
+
+function _defaultApiBaseUrl() {
+    if (ENV.EXPO_PUBLIC_API_BASE_URL) return ENV.EXPO_PUBLIC_API_BASE_URL;
+    if (typeof window === 'undefined') return 'http://127.0.0.1:8080';
+
+    const host = window.location.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return 'http://127.0.0.1:8080';
+    }
+    return window.location.origin;
+}
+
+export type Settings = {
+    apiBaseUrl: string;
+    confidenceThreshold: number;
+    classifierConfidenceThreshold: number;
+    screenSpoofGuardEnabled: boolean;
+    cameraResolution: 'low' | 'medium' | 'high';
+    liveFps: number;
+    liveStabilityWindowSec: number;
+    liveStabilityMinFrames: number;
+    liveStabilityIou: number;
+    ttsEnabled: boolean;
+    ttsSpeed: number;
+    darkMode: boolean;
+    highContrast: boolean;
+    largeFonts: boolean;
+    hapticFeedback: boolean;
+    voiceCommandsEnabled: boolean;
+    debugModeEnabled: boolean;
+    demoFlowMode: DemoFlowMode;
+};
+
+const DEFAULT_SETTINGS: Settings = {
+    apiBaseUrl: _defaultApiBaseUrl(),
+    confidenceThreshold: 0.25,
+    classifierConfidenceThreshold: 0.7,
+    screenSpoofGuardEnabled: false,
+    cameraResolution: 'medium',
+    liveFps: 1,
+    liveStabilityWindowSec: 3,
+    liveStabilityMinFrames: 3,
+    liveStabilityIou: 0.45,
+    ttsEnabled: true,
+    ttsSpeed: 1.0,
+    darkMode: false,
+    highContrast: false,
+    largeFonts: false,
+    hapticFeedback: true,
+    voiceCommandsEnabled: true,
+    debugModeEnabled: false,
+    demoFlowMode: 'off',
+};
+
+type SettingsContextType = {
+    settings: Settings;
+    update: (partial: Partial<Settings>) => void;
+    reset: () => void;
+    /** True while the initial load from storage is in progress. */
+    loading: boolean;
+    /** Clear all persisted settings from storage and reset to defaults. */
+    clearStorage: () => Promise<void>;
+};
+
+const SettingsContext = createContext<SettingsContextType>({
+    settings: DEFAULT_SETTINGS,
+    update: () => { },
+    reset: () => { },
+    loading: true,
+    clearStorage: async () => { },
+});
+
+export function SettingsProvider({ children }: { children: React.ReactNode }) {
+    const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+    const [loading, setLoading] = useState(true);
+    const isInitialized = useRef(false);
+
+    // Load settings from AsyncStorage on mount
+    useEffect(() => {
+        (async () => {
+            try {
+                const stored = await AsyncStorage.getItem(STORAGE_KEY);
+                const storedVersionRaw = await AsyncStorage.getItem(SETTINGS_VERSION_KEY);
+                const storedVersion = Number(storedVersionRaw || 0);
+
+                if (stored) {
+                    const parsed = JSON.parse(stored) as Partial<Settings> & { showDebugPanel?: boolean };
+                    const migrated: Partial<Settings> = { ...parsed };
+                    if (typeof migrated.debugModeEnabled !== 'boolean' && typeof parsed.showDebugPanel === 'boolean') {
+                        migrated.debugModeEnabled = parsed.showDebugPanel;
+                    }
+                    delete (migrated as any).showDebugPanel;
+
+                    // One-time migration: ensure the app starts in light mode with debug mode off.
+                    // This updates existing installs that previously persisted dark/debug states.
+                    if (!Number.isFinite(storedVersion) || storedVersion < SETTINGS_SCHEMA_VERSION) {
+                        migrated.darkMode = false;
+                        migrated.debugModeEnabled = false;
+                    }
+
+                    // Merge with defaults to handle new keys added in updates
+                    setSettings((prev) => ({ ...prev, ...migrated }));
+                }
+
+                await AsyncStorage.setItem(SETTINGS_VERSION_KEY, String(SETTINGS_SCHEMA_VERSION));
+            } catch (e) {
+                console.warn('[SettingsContext] Failed to load settings:', e);
+            } finally {
+                isInitialized.current = true;
+                setLoading(false);
+            }
+        })();
+    }, []);
+
+    // Persist settings to AsyncStorage whenever they change (after initial load)
+    useEffect(() => {
+        if (!isInitialized.current) return;
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(settings)).catch((e) =>
+            console.warn('[SettingsContext] Failed to save settings:', e)
+        );
+    }, [settings]);
+
+    const update = useCallback((partial: Partial<Settings>) => {
+        setSettings((prev) => ({ ...prev, ...partial }));
+    }, []);
+
+    const reset = useCallback(() => {
+        setSettings(DEFAULT_SETTINGS);
+    }, []);
+
+    const clearStorage = useCallback(async () => {
+        try {
+            await Promise.all([
+                AsyncStorage.removeItem(STORAGE_KEY),
+                AsyncStorage.removeItem(SETTINGS_VERSION_KEY),
+            ]);
+            setSettings(DEFAULT_SETTINGS);
+        } catch (e) {
+            console.warn('[SettingsContext] Failed to clear storage:', e);
+        }
+    }, []);
+
+    return (
+        <SettingsContext.Provider value={{ settings, update, reset, loading, clearStorage }}>
+            {children}
+        </SettingsContext.Provider>
+    );
+}
+
+export function useSettings() {
+    return useContext(SettingsContext);
+}
+
+export { DEFAULT_SETTINGS };

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SMC Model Inference</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>SMC Model Inference</h1>
+      <p class="subtitle">
+        Refresh models from S3, then run the full process (detect -> bill reader
+        / coin classifier) from upload or camera.
+      </p>
+      <div id="statusBanner" class="status status-neutral">Ready</div>
+
+      <section class="card">
+        <h2>Model Control</h2>
+        <p class="hint">Refresh to pull latest model artifacts from S3.</p>
+        <div class="row">
+          <label class="field">
+            <span>Artifacts bucket</span>
+            <input id="bucket" placeholder="Artifacts bucket" />
+          </label>
+          <label class="field">
+            <span>Prefix</span>
+            <input
+              id="prefix"
+              placeholder="Prefix (default: output)"
+              value="output"
+            />
+          </label>
+          <button id="refreshBtn">Refresh from S3</button>
+        </div>
+        <div class="row">
+          <label class="field field-wide">
+            <span>Available models</span>
+            <select id="modelSelect"></select>
+          </label>
+          <button id="activateBtn">Activate</button>
+        </div>
+        <p id="modelSummary" class="hint">No models loaded yet.</p>
+        <pre id="modelState"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Upload Image</h2>
+        <p class="hint">
+          Upload a single image file for one-shot pipeline inference. Box labels
+          use classifier output when available.
+        </p>
+        <label class="field" style="max-width: 300px; margin-bottom: 8px">
+          <span>Screen Spoof Protection</span>
+          <input id="spoofGuardEnabled" type="checkbox" />
+        </label>
+        <input
+          type="file"
+          id="fileInput"
+          accept="image/*"
+          aria-label="Upload image"
+        />
+        <button id="uploadInferBtn">Run Inference</button>
+        <div class="image-wrap">
+          <img id="uploadPreview" alt="Uploaded preview" class="hidden" />
+          <canvas id="uploadOverlay" class="hidden"></canvas>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Live Camera</h2>
+        <p class="hint">
+          Start camera first, then capture once or run live at 1 fps.
+        </p>
+        <div class="row">
+          <button id="startCamBtn">Start Camera</button>
+          <button id="stopCamBtn" disabled>Stop Camera</button>
+          <button id="captureBtn">Capture + Infer</button>
+          <button id="toggleLiveBtn">Go Live</button>
+        </div>
+        <div class="video-wrap">
+          <video id="video" playsinline></video>
+          <canvas id="videoOverlay" class="hidden"></canvas>
+          <span class="live-badge hidden">● LIVE</span>
+        </div>
+        <canvas id="captureCanvas" class="hidden"></canvas>
+      </section>
+
+      <section class="card">
+        <h2>Result</h2>
+        <pre id="result"></pre>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

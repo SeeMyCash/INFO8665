@@ -1,0 +1,14 @@
+{
+  "config_hash": "ccb411e6d953aa7286d31130a5048021eb76183bb3429091e5db33cdb2f8e525",
+  "config_path": "training/configs/coin_classifier_config.json",
+  "finished_at": 1771590333,
+  "mode": "smoke",
+  "outputs": {
+    "model": "C:/Users/femil/Documents/PersonalProjects/SMC_data/INFO8665/training/outputs/coin_classifier/smoke/model.json"
+  },
+  "run_id": "smoke",
+  "sprint": "0",
+  "started_at": 1771590333,
+  "task": "95",
+  "train_dir": "training/outputs/_smoke_coin_train"
+}
